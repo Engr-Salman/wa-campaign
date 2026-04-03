@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const API = 'http://localhost:3001/api';
+const API = '/api';
 
 export function useCampaign() {
   const [loading, setLoading] = useState(false);

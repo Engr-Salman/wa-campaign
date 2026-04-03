@@ -139,7 +139,7 @@ export default function CampaignDetail({ socket }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold">Campaign Summary</h3>
             <a
-              href={`http://localhost:3001/api/campaigns/${id}/export`}
+              href={`/api/campaigns/${id}/export`}
               className="btn-secondary flex items-center gap-2 text-sm"
             >
               <Download size={16} /> Export Results CSV

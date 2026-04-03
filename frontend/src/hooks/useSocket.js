@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:3001';
+const SOCKET_URL = window.location.hostname === 'localhost'
+  ? `http://${window.location.hostname}:3001`
+  : window.location.origin;
 
 export function useSocket() {
   const socketRef = useRef(null);
