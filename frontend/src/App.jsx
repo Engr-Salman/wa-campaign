@@ -48,7 +48,7 @@ export default function App() {
 
   // Fetch initial WA status
   useEffect(() => {
-    fetch('http://localhost:3001/api/whatsapp/status')
+    fetch('/api/whatsapp/status')
       .then((r) => r.json())
       .then((data) => {
         setWaStatus(data.status);
@@ -59,7 +59,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('http://localhost:3001/api/whatsapp/logout', {
+      await fetch('/api/whatsapp/logout', {
         method: 'POST',
       });
       setWaStatus('disconnected');

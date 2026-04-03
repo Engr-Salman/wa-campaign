@@ -43,7 +43,7 @@ export default function Settings({ theme, setTheme }) {
 
   const handleLogout = async () => {
     try {
-      await fetch('http://localhost:3001/api/whatsapp/logout', {
+      await fetch('/api/whatsapp/logout', {
         method: 'POST',
       });
       toast.success('Logged out from WhatsApp');
