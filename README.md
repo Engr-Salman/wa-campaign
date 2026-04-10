@@ -24,8 +24,6 @@ The active app in this repository is the root workspace:
 - `uploads/`: uploaded media and receipt files
 - `.wwebjs_auth/`: WhatsApp linked-device session storage
 
-The `email-platform/` directory is a separate project and is not part of the main WhatsApp app runtime.
-
 ## Prerequisites
 
 - Node.js 18+
@@ -176,7 +174,6 @@ wa-campaign/
 |-- frontend/
 |   |-- public/
 |   `-- src/
-|-- email-platform/
 |-- uploads/
 |-- data.db
 |-- package.json

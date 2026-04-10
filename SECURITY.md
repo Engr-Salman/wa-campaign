@@ -18,8 +18,6 @@ This policy covers the root WhatsApp campaign application in this repository, in
 - `.wwebjs_auth/`
 - `uploads/`
 
-The `email-platform/` directory is a separate project and is out of scope for this document unless explicitly stated in a future update.
-
 ## Security Model
 
 The current app includes:
