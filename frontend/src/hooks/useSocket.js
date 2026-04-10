@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { useAuth } from '../context/AuthContext';
 
 const SOCKET_URL = window.location.hostname === 'localhost'
   ? `http://${window.location.hostname}:3001`
   : window.location.origin;
 
 export function useSocket() {
+  const { token } = useAuth();
   const socketRef = useRef(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
+    if (!token) {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+      setConnected(false);
+      return undefined;
+    }
+
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
+      auth: { token },
     });
     socketRef.current = socket;
 
@@ -21,7 +31,7 @@ export function useSocket() {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [token]);
 
   const on = useCallback((event, handler) => {
     socketRef.current?.on(event, handler);

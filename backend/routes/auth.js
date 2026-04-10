@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const router = express.Router();
 const db = require('../db/database');
 const { generateToken, authMiddleware } = require('../middleware/auth');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/mailer');
 
 // Register
 router.post('/register', async (req, res) => {
@@ -17,22 +18,32 @@ router.post('/register', async (req, res) => {
 
   const existing = db.getUserByEmail(email);
   if (existing) {
+    if (!existing.is_verified) {
+      const code = db.resendVerification(email);
+      try {
+        await sendVerificationEmail(existing.email, existing.name, code);
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      return res.status(409).json({
+        error: 'Email already registered but not verified',
+        needsVerification: true,
+        email: existing.email,
+      });
+    }
+
     return res.status(409).json({ error: 'Email already registered' });
   }
 
   try {
     const hash = await bcrypt.hash(password, 10);
     const { id, verification_code } = db.createUser(email, hash, name);
-
-    // In production, send email with verification code
-    // For now, log it and also return it in the response
-    console.log(`Verification code for ${email}: ${verification_code}`);
+    await sendVerificationEmail(email, name, verification_code);
 
     res.json({
       message: 'Registration successful. Please verify your email.',
       email,
-      // Include code in response for development/testing
-      verification_code,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -62,7 +73,7 @@ router.post('/verify', (req, res) => {
 });
 
 // Resend verification code
-router.post('/resend-verification', (req, res) => {
+router.post('/resend-verification', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
@@ -71,9 +82,62 @@ router.post('/resend-verification', (req, res) => {
   if (user.is_verified) return res.status(400).json({ error: 'Already verified' });
 
   const code = db.resendVerification(email);
-  console.log(`New verification code for ${email}: ${code}`);
+  try {
+    await sendVerificationEmail(user.email, user.name, code);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 
-  res.json({ message: 'Verification code resent', verification_code: code });
+  res.json({ message: 'Verification code resent' });
+});
+
+// Forgot password
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const reset = db.createPasswordReset(email);
+  if (!reset) {
+    return res.json({
+      message: 'If an account exists for that email, a reset code has been sent.',
+    });
+  }
+
+  try {
+    await sendPasswordResetEmail(reset.user.email, reset.user.name, reset.code);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({
+    message: 'If an account exists for that email, a reset code has been sent.',
+  });
+});
+
+// Reset password
+router.post('/reset-password', async (req, res) => {
+  const { email, code, password } = req.body;
+
+  if (!email || !code || !password) {
+    return res.status(400).json({ error: 'Email, reset code, and new password are required' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = db.resetPassword(email, code, hash);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({ message: 'Password reset successful. You can now log in.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Login

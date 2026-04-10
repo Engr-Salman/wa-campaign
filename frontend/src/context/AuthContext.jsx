@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { readJsonResponse } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -34,7 +35,7 @@ export function AuthProvider({ children }) {
       return;
     }
     authFetch('/api/auth/me')
-      .then((r) => r.json())
+      .then((r) => readJsonResponse(r))
       .then((data) => {
         if (data.error) {
           logout();
@@ -55,7 +56,7 @@ export function AuthProvider({ children }) {
   const refreshUser = async () => {
     try {
       const res = await authFetch('/api/auth/me');
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!data.error) setUser(data);
     } catch {}
   };

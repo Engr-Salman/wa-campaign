@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import {
   LayoutDashboard, PlusCircle, History as HistoryIcon,
@@ -12,6 +12,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Verify from './pages/Verify';
+import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import NewCampaign from './pages/NewCampaign';
 import CampaignDetail from './pages/CampaignDetail';
@@ -21,6 +22,7 @@ import Credits from './pages/Credits';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminCredits from './pages/AdminCredits';
+import { readJsonResponse } from './utils/api';
 
 function AppRouter() {
   const { user, loading } = useAuth();
@@ -40,6 +42,7 @@ function AppRouter() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
       <Route path="/verify" element={<Verify />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
 
       {/* All other routes require auth — redirect to login if not authed */}
       <Route path="/*" element={user ? <AppLayout /> : <Navigate to="/login" replace />} />
@@ -72,7 +75,7 @@ function AppLayout() {
 
   useEffect(() => {
     authFetch('/api/whatsapp/status')
-      .then((r) => r.json())
+      .then((r) => readJsonResponse(r))
       .then((data) => {
         setWaStatus(data.status);
         if (data.info) setWaInfo(data.info);

@@ -4,13 +4,13 @@ import { Toaster } from 'react-hot-toast';
 import { ShieldCheck, Mail, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
+import { readJsonResponse } from '../utils/api';
 
 export default function Verify() {
   const location = useLocation();
   const navigate = useNavigate();
   const { login } = useAuth();
   const passedEmail = location.state?.email || '';
-  const passedCode = location.state?.code || '';
 
   const [email, setEmail] = useState(passedEmail);
   const [code, setCode] = useState('');
@@ -27,7 +27,7 @@ export default function Verify() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(data.error || 'Verification failed');
       login(data.token, data.user);
       toast.success('Email verified! Welcome!');
@@ -47,9 +47,9 @@ export default function Verify() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(data.error);
-      toast.success('New code sent! Check the console/response.');
+      toast.success('A new verification code has been sent to your email.');
     } catch (err) {
       toast.error(err.message);
     }
@@ -65,15 +65,6 @@ export default function Verify() {
             Enter the 6-digit verification code
           </p>
         </div>
-
-        {passedCode && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 text-center">
-            <p className="text-sm text-blue-700 dark:text-blue-300">
-              <strong>Your verification code is:</strong>{' '}
-              <span className="font-mono font-bold text-lg">{passedCode}</span>
-            </p>
-          </div>
-        )}
 
         <form onSubmit={handleVerify} className="card space-y-4">
           {error && (

@@ -1,0 +1,12 @@
+
+D:\Claude Code\wa-campaign\backend\node_modules\better-sqlite3\lib\methods\wrappers.js:5
+	return this[cppdb].prepare(sql, this, false);
+	                   ^
+SqliteError: no such column: "now" - should this be a string literal in single-quotes?
+    at Database.prepare (D:\Claude Code\wa-campaign\backend\node_modules\better-sqlite3\lib\methods\wrappers.js:5:21)
+    at Object.updateLastLogin (D:\Claude Code\wa-campaign\backend\db\database.js:252:11)
+    at D:\Claude Code\wa-campaign\backend\routes\auth.js:153:6 {
+  code: 'SQLITE_ERROR'
+}
+
+Node.js v24.14.0

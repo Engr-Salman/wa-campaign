@@ -27,6 +27,8 @@ function initSchema() {
       is_admin INTEGER DEFAULT 0,
       verification_code TEXT,
       verification_expires TEXT,
+      password_reset_code TEXT,
+      password_reset_expires TEXT,
       credits INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       last_login TEXT
@@ -119,6 +121,8 @@ function initSchema() {
     try { db.exec("ALTER TABLE campaigns ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0"); } catch {}
     try { db.exec("ALTER TABLE campaigns ADD COLUMN credits_used INTEGER DEFAULT 0"); } catch {}
   }
+  try { db.prepare("SELECT password_reset_code FROM users LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE users ADD COLUMN password_reset_code TEXT"); } catch {} }
+  try { db.prepare("SELECT password_reset_expires FROM users LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE users ADD COLUMN password_reset_expires TEXT"); } catch {} }
 
   // Insert default settings if not exists
   const defaults = {
@@ -208,8 +212,44 @@ function resendVerification(email) {
   return code;
 }
 
+function createPasswordReset(email) {
+  const user = getUserByEmail(email);
+  if (!user) return null;
+
+  const code = crypto.randomInt(100000, 999999).toString();
+  const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+  getDb().prepare(
+    'UPDATE users SET password_reset_code = ?, password_reset_expires = ? WHERE id = ?'
+  ).run(code, expires, user.id);
+
+  return { user, code };
+}
+
+function resetPassword(email, code, passwordHash) {
+  const user = getUserByEmail(email);
+  if (!user) return { success: false, error: 'User not found' };
+  if (!user.password_reset_code || !user.password_reset_expires) {
+    return { success: false, error: 'No password reset requested' };
+  }
+  if (user.password_reset_code !== code) {
+    return { success: false, error: 'Invalid reset code' };
+  }
+  if (new Date(user.password_reset_expires) < new Date()) {
+    return { success: false, error: 'Reset code expired' };
+  }
+
+  getDb().prepare(
+    `UPDATE users
+     SET password_hash = ?, password_reset_code = NULL, password_reset_expires = NULL
+     WHERE id = ?`
+  ).run(passwordHash, user.id);
+
+  return { success: true, user: getUserById(user.id) };
+}
+
 function updateLastLogin(id) {
-  getDb().prepare('UPDATE users SET last_login = datetime("now") WHERE id = ?').run(id);
+  getDb().prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(id);
 }
 
 function getAllUsers() {
@@ -285,7 +325,7 @@ function processCreditRequest(requestId, status, adminNote, adminId) {
   if (!request) return null;
 
   getDb().prepare(
-    'UPDATE credit_requests SET status = ?, admin_note = ?, processed_at = datetime("now"), processed_by = ? WHERE id = ?'
+    "UPDATE credit_requests SET status = ?, admin_note = ?, processed_at = datetime('now'), processed_by = ? WHERE id = ?"
   ).run(status, adminNote || null, adminId, requestId);
 
   if (status === 'approved') {
@@ -305,6 +345,13 @@ function createCampaign(userId, name, message, mediaPath, totalContacts) {
 
 function getCampaign(id) {
   return getDb().prepare('SELECT * FROM campaigns WHERE id = ?').get(id);
+}
+
+function getCampaignForUser(id, userId, isAdmin = false) {
+  if (isAdmin) {
+    return getCampaign(id);
+  }
+  return getDb().prepare('SELECT * FROM campaigns WHERE id = ? AND user_id = ?').get(id, userId);
 }
 
 function getUserCampaigns(userId) {
@@ -345,6 +392,12 @@ function incrementCampaignCreditsUsed(campaignId) {
   getDb().prepare('UPDATE campaigns SET credits_used = credits_used + 1 WHERE id = ?').run(campaignId);
 }
 
+function recoverInterruptedCampaigns() {
+  return getDb()
+    .prepare("UPDATE campaigns SET status = 'paused' WHERE status = 'running'")
+    .run().changes;
+}
+
 // ==================== Contacts ====================
 function insertContacts(campaignId, contacts) {
   const insert = getDb().prepare(
@@ -379,6 +432,24 @@ function updateContactStatus(id, status, errorMessage) {
 
 function incrementContactRetry(id) {
   getDb().prepare('UPDATE contacts SET retry_count = retry_count + 1 WHERE id = ?').run(id);
+}
+
+function deleteContactFromCampaign(campaignId, contactId) {
+  const existing = getDb()
+    .prepare('SELECT id FROM contacts WHERE id = ? AND campaign_id = ?')
+    .get(contactId, campaignId);
+
+  if (!existing) {
+    return { deleted: false };
+  }
+
+  getDb().prepare('DELETE FROM contacts WHERE id = ? AND campaign_id = ?').run(contactId, campaignId);
+  getDb().prepare(
+    'UPDATE campaigns SET total_contacts = (SELECT COUNT(*) FROM contacts WHERE campaign_id = ?) WHERE id = ?'
+  ).run(campaignId, campaignId);
+  updateCampaignCounts(campaignId);
+
+  return { deleted: true };
 }
 
 // ==================== Logs ====================
@@ -443,17 +514,50 @@ function getAdminDashboardStats() {
   };
 }
 
+function getUserMessageStats(userId) {
+  const dbConn = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const weeklyThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const todayStats = dbConn.prepare(
+    `SELECT COUNT(*) as total
+     FROM contacts ct
+     JOIN campaigns c ON c.id = ct.campaign_id
+     WHERE c.user_id = ? AND ct.status = 'sent' AND substr(ct.sent_at, 1, 10) = ?`
+  ).get(userId, today);
+
+  const weeklyStats = dbConn.prepare(
+    `SELECT COUNT(*) as total
+     FROM contacts ct
+     JOIN campaigns c ON c.id = ct.campaign_id
+     WHERE c.user_id = ? AND ct.status = 'sent' AND ct.sent_at >= ?`
+  ).get(userId, weeklyThreshold);
+
+  const allTimeStats = dbConn.prepare(
+    `SELECT COUNT(*) as total
+     FROM contacts ct
+     JOIN campaigns c ON c.id = ct.campaign_id
+     WHERE c.user_id = ? AND ct.status = 'sent'`
+  ).get(userId);
+
+  return {
+    today: todayStats?.total || 0,
+    weekly: weeklyStats?.total || 0,
+    allTime: allTimeStats?.total || 0,
+  };
+}
+
 module.exports = {
   getDb,
   getSetting, setSetting, getAllSettings,
-  createUser, getUserByEmail, getUserById, verifyUser, resendVerification, updateLastLogin, getAllUsers, getUserCount,
+  createUser, getUserByEmail, getUserById, verifyUser, resendVerification, createPasswordReset, resetPassword, updateLastLogin, getAllUsers, getUserCount,
   getUserCredits, addCredits, deductCredits, getCreditTransactions,
   createCreditRequest, getCreditRequests, getUserCreditRequests, processCreditRequest,
-  createCampaign, getCampaign, getUserCampaigns, getAllCampaigns,
-  updateCampaignStatus, updateCampaignCounts, incrementCampaignCreditsUsed,
+  createCampaign, getCampaign, getCampaignForUser, getUserCampaigns, getAllCampaigns,
+  updateCampaignStatus, updateCampaignCounts, incrementCampaignCreditsUsed, recoverInterruptedCampaigns,
   insertContacts, getContactsByCampaign, getPendingContacts, getFailedContacts,
-  updateContactStatus, incrementContactRetry,
+  updateContactStatus, incrementContactRetry, deleteContactFromCampaign,
   addLog, getCampaignLogs,
   incrementDailyStats, getDailyStats, getWeeklyStats, getAllTimeStats,
-  getAdminDashboardStats,
+  getAdminDashboardStats, getUserMessageStats,
 };

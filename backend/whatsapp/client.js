@@ -1,28 +1,73 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
 
-let client = null;
 let io = null;
-let connectionStatus = 'disconnected';
-let clientInfo = null;
+const sessions = new Map();
 
-function getClient() {
-  return client;
+function getRoom(userId) {
+  return `user:${userId}`;
 }
 
-function getConnectionStatus() {
-  return connectionStatus;
+function getSession(userId) {
+  if (!sessions.has(userId)) {
+    sessions.set(userId, {
+      client: null,
+      status: 'disconnected',
+      info: null,
+      qr: null,
+      initializing: false,
+    });
+  }
+
+  return sessions.get(userId);
 }
 
-function getClientInfo() {
-  return clientInfo;
+function emitStatus(userId, extra = {}) {
+  if (!io) return;
+
+  const session = getSession(userId);
+  io.to(getRoom(userId)).emit('whatsapp:status', {
+    status: session.status,
+    info: session.info,
+    ...extra,
+  });
 }
 
-function initClient(socketIo) {
+function emitQr(userId, qr) {
+  if (!io) return;
+  io.to(getRoom(userId)).emit('whatsapp:qr', qr);
+}
+
+function getConnectionStatus(userId) {
+  return getSession(userId).status;
+}
+
+function getClientInfo(userId) {
+  return getSession(userId).info;
+}
+
+function getQrCode(userId) {
+  return getSession(userId).qr;
+}
+
+function getClient(userId) {
+  return getSession(userId).client;
+}
+
+function initClient(socketIo, userId) {
   io = socketIo;
+  const session = getSession(userId);
 
-  client = new Client({
+  if (session.client || session.initializing) {
+    return session.client;
+  }
+
+  session.initializing = true;
+  session.status = 'initializing';
+
+  const client = new Client({
     authStrategy: new LocalAuth({
+      clientId: `user-${userId}`,
       dataPath: path.join(__dirname, '..', '..', '.wwebjs_auth'),
     }),
     puppeteer: {
@@ -38,60 +83,78 @@ function initClient(socketIo) {
     },
   });
 
+  session.client = client;
+
   client.on('qr', (qr) => {
-    connectionStatus = 'qr';
-    io.emit('whatsapp:qr', qr);
-    io.emit('whatsapp:status', { status: 'qr' });
+    session.status = 'qr';
+    session.qr = qr;
+    emitQr(userId, qr);
+    emitStatus(userId);
   });
 
   client.on('authenticated', () => {
-    connectionStatus = 'authenticated';
-    io.emit('whatsapp:status', { status: 'authenticated' });
+    session.status = 'authenticated';
+    emitStatus(userId);
   });
 
   client.on('auth_failure', (msg) => {
-    connectionStatus = 'auth_failure';
-    io.emit('whatsapp:status', { status: 'auth_failure', message: msg });
+    session.initializing = false;
+    session.status = 'auth_failure';
+    session.info = null;
+    session.qr = null;
+    session.client = null;
+    emitStatus(userId, { message: msg });
   });
 
   client.on('ready', () => {
-    connectionStatus = 'connected';
-    clientInfo = {
+    session.initializing = false;
+    session.status = 'connected';
+    session.qr = null;
+    session.info = {
       pushname: client.info.pushname,
       phone: client.info.wid.user,
       platform: client.info.platform,
     };
-    io.emit('whatsapp:status', { status: 'connected', info: clientInfo });
+    emitStatus(userId);
   });
 
   client.on('disconnected', (reason) => {
-    connectionStatus = 'disconnected';
-    clientInfo = null;
-    io.emit('whatsapp:status', { status: 'disconnected', reason });
+    session.initializing = false;
+    session.status = 'disconnected';
+    session.info = null;
+    session.qr = null;
+    session.client = null;
+    emitStatus(userId, { reason });
   });
 
   client.on('change_state', (state) => {
-    io.emit('whatsapp:status', {
-      status: connectionStatus,
-      state,
-      info: clientInfo,
-    });
+    emitStatus(userId, { state });
   });
 
   client.initialize().catch((err) => {
-    console.error('WhatsApp client init error:', err);
-    connectionStatus = 'error';
-    io.emit('whatsapp:status', {
-      status: 'error',
-      message: err.message,
-    });
+    console.error(`WhatsApp client init error for user ${userId}:`, err);
+    session.initializing = false;
+    session.client = null;
+    session.status = 'error';
+    session.info = null;
+    session.qr = null;
+    emitStatus(userId, { message: err.message });
   });
 
   return client;
 }
 
-async function sendMessage(phoneNumber, message, mediaPath) {
-  if (!client || connectionStatus !== 'connected') {
+async function ensureClient(userId) {
+  const session = getSession(userId);
+  if (!session.client && !session.initializing && io) {
+    initClient(io, userId);
+  }
+  return getSession(userId);
+}
+
+async function sendMessage(userId, phoneNumber, message, mediaPath) {
+  const session = await ensureClient(userId);
+  if (!session.client || session.status !== 'connected') {
     throw new Error('WhatsApp client not connected');
   }
 
@@ -99,13 +162,16 @@ async function sendMessage(phoneNumber, message, mediaPath) {
 
   if (mediaPath) {
     const media = MessageMedia.fromFilePath(mediaPath);
-    await client.sendMessage(chatId, media, { caption: message });
+    await session.client.sendMessage(chatId, media, { caption: message });
   } else {
-    await client.sendMessage(chatId, message);
+    await session.client.sendMessage(chatId, message);
   }
 }
 
-async function logout() {
+async function logout(userId) {
+  const session = getSession(userId);
+  const { client } = session;
+
   if (client) {
     try {
       await client.logout();
@@ -117,18 +183,27 @@ async function logout() {
     } catch (e) {
       // ignore
     }
-    client = null;
-    connectionStatus = 'disconnected';
-    clientInfo = null;
-    io.emit('whatsapp:status', { status: 'disconnected' });
+  }
+
+  session.client = null;
+  session.initializing = false;
+  session.status = 'disconnected';
+  session.info = null;
+  session.qr = null;
+  emitStatus(userId);
+
+  if (io) {
+    initClient(io, userId);
   }
 }
 
 module.exports = {
   initClient,
+  ensureClient,
   getClient,
   getConnectionStatus,
   getClientInfo,
+  getQrCode,
   sendMessage,
   logout,
 };

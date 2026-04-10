@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { MessageCircle, UserPlus, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { readJsonResponse } from '../utils/api';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -31,10 +32,17 @@ export default function Register() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Registration failed');
+      const data = await readJsonResponse(res);
+      if (!res.ok) {
+        if (data.needsVerification) {
+          toast.success('Your account already exists. We sent a fresh verification code.');
+          navigate('/verify', { state: { email: data.email } });
+          return;
+        }
+        throw new Error(data.error || 'Registration failed');
+      }
       toast.success('Registration successful! Please verify your email.');
-      navigate('/verify', { state: { email: form.email, code: data.verification_code } });
+      navigate('/verify', { state: { email: form.email } });
     } catch (err) {
       setError(err.message);
       toast.error(err.message);

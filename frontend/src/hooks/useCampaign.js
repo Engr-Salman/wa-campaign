@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { readJsonOrThrow } from '../utils/api';
 
 export function useCampaign() {
   const { authFetch } = useAuth();
@@ -11,8 +12,7 @@ export function useCampaign() {
     setError(null);
     try {
       const res = await authFetch(`/api${url}`, options);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
+      const data = await readJsonOrThrow(res, 'Request failed');
       return data;
     } catch (err) {
       setError(err.message);
@@ -50,9 +50,7 @@ export function useCampaign() {
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Upload failed');
-    return data;
+    return readJsonOrThrow(res, 'Upload failed');
   };
 
   const uploadMedia = async (file) => {
@@ -62,9 +60,7 @@ export function useCampaign() {
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Upload failed');
-    return data;
+    return readJsonOrThrow(res, 'Upload failed');
   };
 
   // Credit-related
@@ -79,9 +75,7 @@ export function useCampaign() {
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
-    return data;
+    return readJsonOrThrow(res, 'Request failed');
   };
 
   // Admin

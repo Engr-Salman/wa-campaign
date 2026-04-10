@@ -5,6 +5,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 
 const authRoutes = require('./routes/auth');
 const campaignRoutes = require('./routes/campaign');
@@ -12,9 +13,10 @@ const contactRoutes = require('./routes/contacts');
 const settingsRoutes = require('./routes/settings');
 const creditsRoutes = require('./routes/credits');
 const adminRoutes = require('./routes/admin');
+const db = require('./db/database');
 const waClient = require('./whatsapp/client');
 const sender = require('./whatsapp/sender');
-const { authMiddleware } = require('./middleware/auth');
+const { authMiddleware, JWT_SECRET } = require('./middleware/auth');
 
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -27,6 +29,26 @@ const io = new Server(server, {
     origin: FRONTEND_URL,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
+});
+
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) {
+      return next(new Error('Authentication required'));
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = db.getUserById(decoded.id);
+    if (!user || !user.is_verified) {
+      return next(new Error('Unauthorized'));
+    }
+
+    socket.user = user;
+    next();
+  } catch (error) {
+    next(new Error('Unauthorized'));
+  }
 });
 
 // Middleware
@@ -49,16 +71,17 @@ app.use('/api/admin', adminRoutes);
 
 // WhatsApp status endpoint (protected)
 app.get('/api/whatsapp/status', authMiddleware, (req, res) => {
+  waClient.initClient(io, req.user.id);
   res.json({
-    status: waClient.getConnectionStatus(),
-    info: waClient.getClientInfo(),
+    status: waClient.getConnectionStatus(req.user.id),
+    info: waClient.getClientInfo(req.user.id),
   });
 });
 
 // WhatsApp logout (protected)
 app.post('/api/whatsapp/logout', authMiddleware, async (req, res) => {
   try {
-    await waClient.logout();
+    await waClient.logout(req.user.id);
     res.json({ status: 'logged_out' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -74,10 +97,17 @@ app.get('/api/health', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
+  socket.join(`user:${socket.user.id}`);
+  waClient.initClient(io, socket.user.id);
+
   socket.emit('whatsapp:status', {
-    status: waClient.getConnectionStatus(),
-    info: waClient.getClientInfo(),
+    status: waClient.getConnectionStatus(socket.user.id),
+    info: waClient.getClientInfo(socket.user.id),
   });
+  const qrCode = waClient.getQrCode(socket.user.id);
+  if (qrCode) {
+    socket.emit('whatsapp:qr', qrCode);
+  }
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
@@ -86,8 +116,10 @@ io.on('connection', (socket) => {
 
 // Initialize WhatsApp client and sender
 sender.setIo(io);
-waClient.initClient(io);
-
+const recoveredCampaigns = db.recoverInterruptedCampaigns();
+if (recoveredCampaigns > 0) {
+  console.log(`Recovered ${recoveredCampaigns} interrupted campaign(s) to paused state`);
+}
 server.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
 });

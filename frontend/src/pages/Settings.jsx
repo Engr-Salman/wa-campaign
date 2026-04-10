@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Save, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaign } from '../hooks/useCampaign';
+import { useAuth } from '../context/AuthContext';
+import { readJsonResponse } from '../utils/api';
 
 const SAFE_LIMITS = {
   messages_per_minute: 8,
@@ -11,6 +13,7 @@ const SAFE_LIMITS = {
 
 export default function Settings({ theme, setTheme }) {
   const { getSettings, updateSettings } = useCampaign();
+  const { authFetch } = useAuth();
   const [settings, setSettings] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -43,12 +46,14 @@ export default function Settings({ theme, setTheme }) {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/whatsapp/logout', {
+      const res = await authFetch('/api/whatsapp/logout', {
         method: 'POST',
       });
+      const data = await readJsonResponse(res);
+      if (!res.ok) throw new Error(data.error || 'Logout failed');
       toast.success('Logged out from WhatsApp');
-    } catch {
-      toast.error('Logout failed');
+    } catch (error) {
+      toast.error(error.message || 'Logout failed');
     }
   };
 

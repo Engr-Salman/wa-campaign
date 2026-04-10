@@ -8,6 +8,15 @@ const Papa = require('papaparse');
 // All campaign routes require auth
 router.use(authMiddleware);
 
+function getOwnedCampaign(req, res) {
+  const campaign = db.getCampaignForUser(req.params.id || req.params.campaignId, req.user.id, req.user.is_admin);
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return null;
+  }
+  return campaign;
+}
+
 // Get user's campaigns
 router.get('/', (req, res) => {
   const campaigns = db.getUserCampaigns(req.user.id);
@@ -16,11 +25,8 @@ router.get('/', (req, res) => {
 
 // Get single campaign with contacts (only if owned by user)
 router.get('/:id', (req, res) => {
-  const campaign = db.getCampaign(req.params.id);
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-  if (campaign.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
   const contacts = db.getContactsByCampaign(req.params.id);
   const logs = db.getCampaignLogs(req.params.id, 200);
   res.json({ ...campaign, contacts, logs });
@@ -58,15 +64,12 @@ router.post('/', (req, res) => {
 
 // Start campaign
 router.post('/:id/start', (req, res) => {
-  const campaign = db.getCampaign(req.params.id);
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-  if (campaign.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
 
   // Check credits before starting
   const pendingContacts = db.getPendingContacts(campaign.id);
-  const userCredits = db.getUserCredits(req.user.id);
+  const userCredits = db.getUserCredits(campaign.user_id);
   if (userCredits < pendingContacts.length) {
     return res.status(402).json({
       error: `Insufficient credits. Need ${pendingContacts.length}, have ${userCredits}.`,
@@ -74,60 +77,77 @@ router.post('/:id/start', (req, res) => {
   }
 
   try {
-    sender.startCampaign(parseInt(req.params.id), req.user.id);
+    sender.startCampaign(parseInt(req.params.id), campaign.user_id);
     res.json({ status: 'started' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.message.includes('already active') ? 409 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
 // Pause campaign
 router.post('/:id/pause', (req, res) => {
-  sender.pauseCampaign();
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
+  const paused = sender.pauseCampaign(parseInt(req.params.id), req.user.id, req.user.is_admin);
+  if (!paused) {
+    return res.status(409).json({ error: 'Campaign is not currently active' });
+  }
   res.json({ status: 'paused' });
 });
 
 // Resume campaign
 router.post('/:id/resume', (req, res) => {
-  const campaign = db.getCampaign(req.params.id);
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-  if (campaign.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
+
+  try {
+    sender.resumeCampaign(parseInt(req.params.id), campaign.user_id);
+    res.json({ status: 'resumed' });
+  } catch (err) {
+    const status = err.message.includes('already active') ? 409 : 500;
+    res.status(status).json({ error: err.message });
   }
-  sender.resumeCampaign(parseInt(req.params.id), req.user.id);
-  res.json({ status: 'resumed' });
 });
 
 // Stop campaign
 router.post('/:id/stop', (req, res) => {
-  sender.stopCampaign();
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
+  const stopped = sender.stopCampaign(parseInt(req.params.id), req.user.id, req.user.is_admin);
+  if (!stopped) {
+    return res.status(409).json({ error: 'Campaign is not currently active' });
+  }
   res.json({ status: 'stopped' });
 });
 
 // Retry failed
 router.post('/:id/retry', (req, res) => {
-  const campaign = db.getCampaign(req.params.id);
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-  if (campaign.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
   try {
-    sender.retryFailed(parseInt(req.params.id), req.user.id);
+    sender.retryFailed(parseInt(req.params.id), campaign.user_id);
     res.json({ status: 'retrying' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.message.includes('already active') ? 409 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
 // Delete a contact from campaign
 router.delete('/:campaignId/contacts/:contactId', (req, res) => {
   try {
-    db.getDb()
-      .prepare('DELETE FROM contacts WHERE id = ? AND campaign_id = ?')
-      .run(req.params.contactId, req.params.campaignId);
-    db.getDb()
-      .prepare('UPDATE campaigns SET total_contacts = total_contacts - 1 WHERE id = ?')
-      .run(req.params.campaignId);
+    const campaign = getOwnedCampaign(req, res);
+    if (!campaign) return;
+    if (campaign.status === 'running') {
+      return res.status(409).json({ error: 'Cannot delete contacts while campaign is running' });
+    }
+
+    const result = db.deleteContactFromCampaign(req.params.campaignId, req.params.contactId);
+    if (!result.deleted) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
     res.json({ status: 'deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -136,11 +156,8 @@ router.delete('/:campaignId/contacts/:contactId', (req, res) => {
 
 // Export campaign results as CSV
 router.get('/:id/export', (req, res) => {
-  const campaign = db.getCampaign(req.params.id);
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-  if (campaign.user_id !== req.user.id && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
 
   const contacts = db.getContactsByCampaign(req.params.id);
   const csvData = contacts.map((c) => ({
@@ -161,6 +178,8 @@ router.get('/:id/export', (req, res) => {
 
 // Get campaign logs
 router.get('/:id/logs', (req, res) => {
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
   const logs = db.getCampaignLogs(req.params.id, 500);
   res.json(logs);
 });

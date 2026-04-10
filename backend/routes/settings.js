@@ -25,16 +25,15 @@ router.put('/', (req, res) => {
 
 // Get dashboard stats for current user
 router.get('/stats', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  // User-specific stats from their campaigns
   const userStats = db.getDb().prepare(
-    'SELECT COALESCE(SUM(sent_count), 0) as total_sent, COUNT(*) as total_campaigns FROM campaigns WHERE user_id = ?'
+    'SELECT COUNT(*) as total_campaigns FROM campaigns WHERE user_id = ?'
   ).get(req.user.id);
+  const messageStats = db.getUserMessageStats(req.user.id);
 
   res.json({
-    today: db.getDailyStats(today),
-    weekly: db.getWeeklyStats(),
-    allTime: userStats.total_sent,
+    today: messageStats.today,
+    weekly: messageStats.weekly,
+    allTime: messageStats.allTime,
     totalCampaigns: userStats.total_campaigns,
     credits: db.getUserCredits(req.user.id),
   });

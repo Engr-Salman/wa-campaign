@@ -1,0 +1,8 @@
+=3015 : The term '=3015' is not recognized as the name of a cmdlet, function, script file, or operable program. Check 
+the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:52
++ Set-Location 'D:\Claude Code\wa-campaign\backend'; ='3015'; node inde ...
++                                                    ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=3015:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
