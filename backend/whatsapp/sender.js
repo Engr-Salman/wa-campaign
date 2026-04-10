@@ -3,6 +3,7 @@ const rateLimiter = require('../utils/rateLimiter');
 const db = require('../db/database');
 
 let activeCampaign = null;
+let activeUserId = null;
 let isPaused = false;
 let isStopped = false;
 let io = null;
@@ -26,7 +27,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function startCampaign(campaignId) {
+async function startCampaign(campaignId, userId) {
   const campaign = db.getCampaign(campaignId);
   if (!campaign) throw new Error('Campaign not found');
 
@@ -35,6 +36,7 @@ async function startCampaign(campaignId) {
   }
 
   activeCampaign = campaignId;
+  activeUserId = userId;
   isPaused = false;
   isStopped = false;
 
@@ -64,15 +66,28 @@ async function startCampaign(campaignId) {
 
     const contact = contacts[i];
 
-    // Skip invalid/skipped contacts
     if (contact.status === 'invalid' || contact.status === 'skipped') {
       continue;
+    }
+
+    // Check user has credits before sending
+    const userCredits = db.getUserCredits(userId);
+    if (userCredits < 1) {
+      isPaused = true;
+      io.emit('campaign:rate_limit', {
+        campaignId,
+        reason: 'no_credits',
+        delay: 0,
+        resumeAt: null,
+      });
+      db.updateCampaignStatus(campaignId, 'paused');
+      io.emit('campaign:status', { campaignId, status: 'paused' });
+      break;
     }
 
     // Rate limiting
     const rateCheck = rateLimiter.getDelay();
     if (rateCheck.delay === -1) {
-      // Daily limit reached
       isPaused = true;
       io.emit('campaign:rate_limit', {
         campaignId,
@@ -94,11 +109,15 @@ async function startCampaign(campaignId) {
       await sleep(rateCheck.delay);
     }
 
-    // Send message
     const message = personalizeMessage(campaign.message, contact);
 
     try {
       await waClient.sendMessage(contact.phone_number, message, campaign.media_path);
+
+      // Deduct 1 credit
+      db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
+      db.incrementCampaignCreditsUsed(campaignId);
+
       db.updateContactStatus(contact.id, 'sent', null);
       rateLimiter.recordSend();
       sentInSession++;
@@ -116,7 +135,6 @@ async function startCampaign(campaignId) {
 
       if (contact.retry_count < maxRetries) {
         db.incrementContactRetry(contact.id);
-        // Exponential backoff: 30s, 60s
         const retryDelay = Math.pow(2, contact.retry_count) * 30000;
         io.emit('campaign:message_retry', {
           campaignId,
@@ -127,13 +145,12 @@ async function startCampaign(campaignId) {
         });
         await sleep(retryDelay);
 
-        // Retry
         try {
-          await waClient.sendMessage(
-            contact.phone_number,
-            message,
-            campaign.media_path
-          );
+          await waClient.sendMessage(contact.phone_number, message, campaign.media_path);
+
+          db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
+          db.incrementCampaignCreditsUsed(campaignId);
+
           db.updateContactStatus(contact.id, 'sent', null);
           rateLimiter.recordSend();
           sentInSession++;
@@ -147,13 +164,7 @@ async function startCampaign(campaignId) {
           });
         } catch (retryErr) {
           db.updateContactStatus(contact.id, 'failed', retryErr.message);
-          db.addLog(
-            campaignId,
-            contact.id,
-            contact.phone_number,
-            'failed',
-            retryErr.message
-          );
+          db.addLog(campaignId, contact.id, contact.phone_number, 'failed', retryErr.message);
           io.emit('campaign:message_failed', {
             campaignId,
             contactId: contact.id,
@@ -165,13 +176,7 @@ async function startCampaign(campaignId) {
         }
       } else {
         db.updateContactStatus(contact.id, 'failed', err.message);
-        db.addLog(
-          campaignId,
-          contact.id,
-          contact.phone_number,
-          'failed',
-          err.message
-        );
+        db.addLog(campaignId, contact.id, contact.phone_number, 'failed', err.message);
         io.emit('campaign:message_failed', {
           campaignId,
           contactId: contact.id,
@@ -183,11 +188,10 @@ async function startCampaign(campaignId) {
       }
     }
 
-    // Update counts and emit progress
     db.updateCampaignCounts(campaignId);
     const updatedCampaign = db.getCampaign(campaignId);
     const elapsed = Date.now() - startTime;
-    const rate = sentInSession / (elapsed / 1000); // messages per second
+    const rate = sentInSession / (elapsed / 1000);
     const remaining =
       updatedCampaign.total_contacts -
       updatedCampaign.sent_count -
@@ -206,7 +210,6 @@ async function startCampaign(campaignId) {
     });
   }
 
-  // Check if completed
   if (!isStopped && !isPaused) {
     db.updateCampaignCounts(campaignId);
     db.updateCampaignStatus(campaignId, 'completed');
@@ -214,24 +217,21 @@ async function startCampaign(campaignId) {
   }
 
   activeCampaign = null;
+  activeUserId = null;
 }
 
 function pauseCampaign() {
   if (activeCampaign) {
     isPaused = true;
     db.updateCampaignStatus(activeCampaign, 'paused');
-    io.emit('campaign:status', {
-      campaignId: activeCampaign,
-      status: 'paused',
-    });
+    io.emit('campaign:status', { campaignId: activeCampaign, status: 'paused' });
   }
 }
 
-function resumeCampaign(campaignId) {
+function resumeCampaign(campaignId, userId) {
   isPaused = false;
   if (!activeCampaign) {
-    // Restart from pending
-    startCampaign(campaignId);
+    startCampaign(campaignId, userId);
   }
 }
 
@@ -239,28 +239,16 @@ function stopCampaign() {
   isStopped = true;
 }
 
-async function retryFailed(campaignId) {
+async function retryFailed(campaignId, userId) {
   const failed = db.getFailedContacts(campaignId);
   for (const contact of failed) {
     db.updateContactStatus(contact.id, 'pending', null);
   }
-  // Reset retry counts
-  const dbInstance = db.getDb();
-  dbInstance
-    .prepare(
-      "UPDATE contacts SET retry_count = 0 WHERE campaign_id = ? AND status = 'pending'"
-    )
+  db.getDb()
+    .prepare("UPDATE contacts SET retry_count = 0 WHERE campaign_id = ? AND status = 'pending'")
     .run(campaignId);
 
-  return startCampaign(campaignId);
+  return startCampaign(campaignId, userId);
 }
 
-module.exports = {
-  setIo,
-  getActiveCampaign,
-  startCampaign,
-  pauseCampaign,
-  resumeCampaign,
-  stopCampaign,
-  retryFailed,
-};
+module.exports = { setIo, getActiveCampaign, startCampaign, pauseCampaign, resumeCampaign, stopCampaign, retryFailed };

@@ -4,6 +4,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { parseCSV, parseExcel } = require('../utils/csvParser');
+const { authMiddleware } = require('../middleware/auth');
+
+router.use(authMiddleware);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
