@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MessageCircle, LogIn } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
+import { MessageCircle, LogIn, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 
@@ -10,10 +11,12 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
+    setError('');
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -23,16 +26,16 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) {
         if (data.needsVerification) {
-          toast.error('Please verify your email first');
           navigate('/verify', { state: { email: data.email } });
           return;
         }
-        throw new Error(data.error);
+        throw new Error(data.error || 'Login failed');
       }
       login(data.token, data.user);
       toast.success('Welcome back!');
       navigate(data.user.is_admin ? '/admin' : '/');
     } catch (err) {
+      setError(err.message);
       toast.error(err.message);
     } finally {
       setSubmitting(false);
@@ -49,6 +52,12 @@ export default function Login() {
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-4">
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg p-3 text-sm flex items-center gap-2">
+              <AlertCircle size={16} />
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Email</label>
             <input
@@ -87,6 +96,7 @@ export default function Login() {
           </p>
         </form>
       </div>
+      <Toaster position="bottom-right" />
     </div>
   );
 }
