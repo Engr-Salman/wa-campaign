@@ -13,9 +13,11 @@ import QRCodeLogin from '../components/QRCodeLogin';
 import ContactTable from '../components/ContactTable';
 import MessageComposer from '../components/MessageComposer';
 import { useCampaign } from '../hooks/useCampaign';
+import { useAuth } from '../context/AuthContext';
 
 export default function NewCampaign({ waStatus, waInfo, qrCode }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { uploadContacts, uploadMedia, createCampaign, startCampaign } =
     useCampaign();
 
@@ -291,10 +293,25 @@ export default function NewCampaign({ waStatus, waInfo, qrCode }) {
             </p>
           )}
 
+          <div className={`rounded-lg p-3 text-sm border ${
+            (user?.credits || 0) >= validContacts.length
+              ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
+              : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+          }`}>
+            <strong>Credits required:</strong> {validContacts.length} (1 credit per message)
+            {' | '}
+            <strong>Your balance:</strong> {user?.credits || 0} credits
+            {(user?.credits || 0) < validContacts.length && (
+              <span className="block mt-1">
+                <AlertTriangle size={14} className="inline mr-1" />
+                Insufficient credits. Please <a href="/credits" className="underline font-bold">buy more credits</a> first.
+              </span>
+            )}
+          </div>
+
           <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 text-sm text-yellow-700 dark:text-yellow-300">
             <AlertTriangle size={14} className="inline mr-1" />
             Messages will be sent with randomized delays to protect your account.
-            This may take a while for large lists.
           </div>
 
           <div className="flex gap-3">
