@@ -9,9 +9,9 @@
   "scripts": {
     "postinstall": "npm --prefix backend install && npm --prefix frontend install",
     "build": "npm --prefix frontend run build",
-    "start": "node backend/index.js",
+    "start": "node --experimental-sqlite backend/index.js",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && node index.js",
+    "dev:backend": "cd backend && node --experimental-sqlite index.js",
     "dev:frontend": "cd frontend && npx vite --host",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
   },

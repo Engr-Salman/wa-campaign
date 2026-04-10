@@ -26,7 +26,7 @@ The active app in this repository is the root workspace:
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22.x
 - npm 9+
 - Google Chrome or Chromium for `whatsapp-web.js`
 - A Gmail account with 2-Step Verification enabled and an App Password for outbound email
@@ -84,7 +84,7 @@ This repository is now prepared for single-app Node deployment:
 
 - the frontend is built with Vite
 - the backend serves the built frontend from `frontend/dist`
-- the app starts with a single process: `node backend/index.js`
+- the app starts with a single process using Node's built-in SQLite module
 
 Recommended Hostinger settings:
 
@@ -108,6 +108,7 @@ Important notes:
 
 - `npm install` at the root will trigger `postinstall`, which installs both backend and frontend dependencies
 - if you deploy from a ZIP, make sure the ZIP root contains `package.json`, `backend/`, and `frontend/`
+- the app now uses Node's built-in `node:sqlite` module, so Node `22.x` is required
 - if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer
 - runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
 
@@ -216,7 +217,7 @@ wa-campaign/
 
 ## Tech Stack
 
-- Backend: Node.js, Express, Socket.IO, better-sqlite3
+- Backend: Node.js, Express, Socket.IO, `node:sqlite`
 - Frontend: React 18, Vite, Tailwind CSS
 - Auth: JWT + bcrypt
 - Email: Nodemailer via Gmail SMTP
@@ -225,7 +226,7 @@ wa-campaign/
 
 ## Development Notes
 
-- The backend uses SQLite directly with `better-sqlite3`
+- The backend uses Node's built-in `node:sqlite` module
 - Campaign execution is in-process
 - Interrupted running campaigns are recovered to `paused` state on restart
 - Uploaded runtime files such as `data.db-wal` and `data.db-shm` may appear during local execution

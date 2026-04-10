@@ -1,4 +1,4 @@
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -8,9 +8,11 @@ let db;
 
 function getDb() {
   if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    db = new DatabaseSync(DB_PATH, {
+      enableForeignKeyConstraints: true,
+    });
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA foreign_keys = ON;');
     initSchema();
   }
   return db;
@@ -184,7 +186,7 @@ function createUser(email, passwordHash, name) {
   const result = getDb().prepare(
     'INSERT INTO users (email, password_hash, name, verification_code, verification_expires) VALUES (?, ?, ?, ?, ?)'
   ).run(email, passwordHash, name, code, expires);
-  return { id: result.lastInsertRowid, verification_code: code };
+  return { id: Number(result.lastInsertRowid), verification_code: code };
 }
 
 function getUserByEmail(email) {
@@ -299,7 +301,7 @@ function createCreditRequest(userId, amount, receiptPath) {
   const result = getDb().prepare(
     'INSERT INTO credit_requests (user_id, amount, pkr_amount, receipt_path) VALUES (?, ?, ?, ?)'
   ).run(userId, amount, pkrAmount, receiptPath);
-  return result.lastInsertRowid;
+  return Number(result.lastInsertRowid);
 }
 
 function getCreditRequests(status) {
@@ -340,7 +342,7 @@ function createCampaign(userId, name, message, mediaPath, totalContacts) {
   const result = getDb().prepare(
     'INSERT INTO campaigns (user_id, name, message, media_path, total_contacts) VALUES (?, ?, ?, ?, ?)'
   ).run(userId, name, message, mediaPath || null, totalContacts);
-  return result.lastInsertRowid;
+  return Number(result.lastInsertRowid);
 }
 
 function getCampaign(id) {
@@ -400,15 +402,20 @@ function recoverInterruptedCampaigns() {
 
 // ==================== Contacts ====================
 function insertContacts(campaignId, contacts) {
-  const insert = getDb().prepare(
+  const database = getDb();
+  const insert = database.prepare(
     'INSERT INTO contacts (campaign_id, phone_number, name, custom_field_1, custom_field_2, status) VALUES (?, ?, ?, ?, ?, ?)'
   );
-  const insertMany = getDb().transaction((contacts) => {
+  database.exec('BEGIN');
+  try {
     for (const c of contacts) {
       insert.run(campaignId, c.phone_number, c.name || '', c.custom_field_1 || '', c.custom_field_2 || '', c.status || 'pending');
     }
-  });
-  insertMany(contacts);
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function getContactsByCampaign(campaignId) {
