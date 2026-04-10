@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
-import { Paperclip, X, Eye } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Paperclip, X, Eye, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function MessageComposer({
   message,
@@ -9,6 +10,8 @@ export default function MessageComposer({
   contacts,
   onMediaUpload,
 }) {
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
   const wordCount = message.trim() ? message.trim().split(/\s+/).length : 0;
   const charCount = message.length;
 
@@ -21,12 +24,31 @@ export default function MessageComposer({
       .replace(/\{\{custom_field_2\}\}/gi, first.custom_field_2 || '');
   }, [message, contacts]);
 
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
   const handleFileChange = async (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
+
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+
     if (onMediaUpload) {
-      const result = await onMediaUpload(file);
-      setMediaFile({ name: file.name, path: result.path });
+      setUploading(true);
+      try {
+        const result = await onMediaUpload(file);
+        setMediaFile({ name: file.name, path: result.path });
+        toast.success(`Attached: ${file.name}`);
+      } catch (err) {
+        toast.error('Failed to upload attachment: ' + (err.message || 'Unknown error'));
+      } finally {
+        setUploading(false);
+      }
+    } else {
+      // No upload handler — store locally
+      setMediaFile({ name: file.name, file });
     }
   };
 
@@ -53,9 +75,16 @@ export default function MessageComposer({
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">
+        <p className="block text-sm font-medium mb-1">
           Attachment (optional)
-        </label>
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,application/pdf,video/*"
+          onChange={handleFileChange}
+          className="hidden"
+        />
         {mediaFile ? (
           <div className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
             <Paperclip size={16} />
@@ -68,18 +97,24 @@ export default function MessageComposer({
             </button>
           </div>
         ) : (
-          <label className="block cursor-pointer">
-            <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center text-sm text-gray-500 hover:border-whatsapp transition-colors">
-              <Paperclip size={16} className="inline mr-1" />
-              Click to attach image, PDF, or video
-            </div>
-            <input
-              type="file"
-              accept="image/*,application/pdf,video/*"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-          </label>
+          <button
+            type="button"
+            onClick={handleAttachClick}
+            disabled={uploading}
+            className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center text-sm text-gray-500 hover:border-whatsapp transition-colors cursor-pointer"
+          >
+            {uploading ? (
+              <>
+                <Loader2 size={16} className="inline mr-1 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Paperclip size={16} className="inline mr-1" />
+                Click to attach image, PDF, or video
+              </>
+            )}
+          </button>
         )}
       </div>
 
@@ -87,7 +122,7 @@ export default function MessageComposer({
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Eye size={14} />
-            <label className="text-sm font-medium">Message Preview</label>
+            <p className="text-sm font-medium">Message Preview</p>
           </div>
           <div className="bg-whatsapp-light dark:bg-gray-700 rounded-lg p-4 text-sm whitespace-pre-wrap">
             {preview}
