@@ -1,0 +1,11 @@
+email,first_name,last_name,company,source
+alice@example.com,Alice,Andrews,Orbit Labs,website
+bob@example.com,Bob,Brown,Helix Inc,signup-form
+carol@example.com,Carol,Chen,Vector Co,conference
+dave@example.com,Dave,Diaz,Nimbus,webinar
+eve@example.com,Eve,Evans,Stratus,newsletter
+frank@example.com,Frank,Foster,Axiom,partnership
+grace@example.com,Grace,Gomez,Cirrus,website
+henry@example.com,Henry,Hughes,Zenith,webinar
+iris@example.com,Iris,Ito,Nebula,referral
+jack@example.com,Jack,Johnson,Prism,newsletter
