@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShieldCheck, Mail } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
+import { ShieldCheck, Mail, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,10 +15,12 @@ export default function Verify() {
   const [email, setEmail] = useState(passedEmail);
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const handleVerify = async (e) => {
     e.preventDefault();
     setSubmitting(true);
+    setError('');
     try {
       const res = await fetch('/api/auth/verify', {
         method: 'POST',
@@ -25,11 +28,12 @@ export default function Verify() {
         body: JSON.stringify({ email, code }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Verification failed');
       login(data.token, data.user);
       toast.success('Email verified! Welcome!');
       navigate('/');
     } catch (err) {
+      setError(err.message);
       toast.error(err.message);
     } finally {
       setSubmitting(false);
@@ -45,7 +49,7 @@ export default function Verify() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success('New code sent!');
+      toast.success('New code sent! Check the console/response.');
     } catch (err) {
       toast.error(err.message);
     }
@@ -58,20 +62,26 @@ export default function Verify() {
           <Mail className="mx-auto text-whatsapp mb-3" size={48} />
           <h1 className="text-3xl font-bold">Verify Your Email</h1>
           <p className="text-gray-500 mt-1">
-            Enter the 6-digit code sent to your email
+            Enter the 6-digit verification code
           </p>
         </div>
 
         {passedCode && (
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 text-center">
             <p className="text-sm text-blue-700 dark:text-blue-300">
-              <strong>Development mode:</strong> Your verification code is{' '}
+              <strong>Your verification code is:</strong>{' '}
               <span className="font-mono font-bold text-lg">{passedCode}</span>
             </p>
           </div>
         )}
 
         <form onSubmit={handleVerify} className="card space-y-4">
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg p-3 text-sm flex items-center gap-2">
+              <AlertCircle size={16} />
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Email</label>
             <input
@@ -113,6 +123,7 @@ export default function Verify() {
           </button>
         </form>
       </div>
+      <Toaster position="bottom-right" />
     </div>
   );
 }

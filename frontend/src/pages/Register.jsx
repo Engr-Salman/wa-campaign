@@ -1,23 +1,26 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MessageCircle, UserPlus } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
+import { MessageCircle, UserPlus, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Register() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
     if (form.password !== form.confirmPassword) {
-      toast.error('Passwords do not match');
+      setError('Passwords do not match');
       return;
     }
     if (form.password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters');
       return;
     }
 
@@ -29,10 +32,11 @@ export default function Register() {
         body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Registration failed');
       toast.success('Registration successful! Please verify your email.');
       navigate('/verify', { state: { email: form.email, code: data.verification_code } });
     } catch (err) {
+      setError(err.message);
       toast.error(err.message);
     } finally {
       setSubmitting(false);
@@ -49,6 +53,12 @@ export default function Register() {
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-4">
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg p-3 text-sm flex items-center gap-2">
+              <AlertCircle size={16} />
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Full Name</label>
             <input type="text" value={form.name} onChange={update('name')} className="input-field" placeholder="Your name" required />
@@ -75,6 +85,7 @@ export default function Register() {
           </p>
         </form>
       </div>
+      <Toaster position="bottom-right" />
     </div>
   );
 }

@@ -22,20 +22,29 @@ import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminCredits from './pages/AdminCredits';
 
-function ProtectedRoute({ children }) {
+function AppRouter() {
   const { user, loading } = useAuth();
-  const location = useLocation();
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>;
-  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
-  return children;
-}
 
-function AdminRoute({ children }) {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>;
-  if (!user) return <Navigate to="/login" replace />;
-  if (!user.is_admin) return <Navigate to="/" replace />;
-  return children;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-400">
+        <MessageCircle className="animate-pulse text-whatsapp mr-3" size={32} />
+        Loading...
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      {/* Public auth routes — only accessible when NOT logged in */}
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+      <Route path="/verify" element={<Verify />} />
+
+      {/* All other routes require auth — redirect to login if not authed */}
+      <Route path="/*" element={user ? <AppLayout /> : <Navigate to="/login" replace />} />
+    </Routes>
+  );
 }
 
 function AppLayout() {
@@ -82,6 +91,7 @@ function AppLayout() {
   const navLink = (to, icon, label) => (
     <NavLink
       to={to}
+      end={to === '/' || to === '/admin'}
       className={({ isActive }) =>
         `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
           isActive ? 'bg-whatsapp text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -139,15 +149,20 @@ function AppLayout() {
 
         <main className="flex-1 p-6">
           <Routes>
-            <Route path="/" element={<ProtectedRoute><Dashboard waStatus={waStatus} /></ProtectedRoute>} />
-            <Route path="/campaign/new" element={<ProtectedRoute><NewCampaign waStatus={waStatus} waInfo={waInfo} qrCode={qrCode} /></ProtectedRoute>} />
-            <Route path="/campaign/:id" element={<ProtectedRoute><CampaignDetail socket={socket} /></ProtectedRoute>} />
-            <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
-            <Route path="/credits" element={<ProtectedRoute><Credits /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings theme={theme} setTheme={setTheme} /></ProtectedRoute>} />
-            <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-            <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
-            <Route path="/admin/credits" element={<AdminRoute><AdminCredits /></AdminRoute>} />
+            <Route path="/" element={<Dashboard waStatus={waStatus} />} />
+            <Route path="/campaign/new" element={<NewCampaign waStatus={waStatus} waInfo={waInfo} qrCode={qrCode} />} />
+            <Route path="/campaign/:id" element={<CampaignDetail socket={socket} />} />
+            <Route path="/history" element={<History />} />
+            <Route path="/credits" element={<Credits />} />
+            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} />} />
+            {user?.is_admin && (
+              <>
+                <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/credits" element={<AdminCredits />} />
+              </>
+            )}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>
@@ -171,12 +186,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/verify" element={<Verify />} />
-          <Route path="/*" element={<ProtectedRoute><AppLayout /></ProtectedRoute>} />
-        </Routes>
+        <AppRouter />
       </AuthProvider>
     </BrowserRouter>
   );
