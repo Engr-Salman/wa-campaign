@@ -20,13 +20,23 @@ const { authMiddleware, JWT_SECRET } = require('./middleware/auth');
 
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const FRONTEND_DIST_PATH = path.join(__dirname, '..', 'frontend', 'dist');
+const hasFrontendBuild = require('fs').existsSync(FRONTEND_DIST_PATH);
+
+const allowedOrigins = [FRONTEND_URL].filter(Boolean);
+function corsOrigin(origin, callback) {
+  if (!origin || allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  return callback(new Error('Not allowed by CORS'));
+}
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
 });
@@ -52,12 +62,15 @@ io.use((socket, next) => {
 });
 
 // Middleware
-app.use(cors({ origin: FRONTEND_URL }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Static uploads
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+if (hasFrontendBuild) {
+  app.use(express.static(FRONTEND_DIST_PATH));
+}
 
 // Public routes (no auth)
 app.use('/api/auth', authRoutes);
@@ -93,6 +106,12 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+if (hasFrontendBuild) {
+  app.get(/^(?!\/api|\/socket\.io|\/uploads).*/, (req, res) => {
+    res.sendFile(path.join(FRONTEND_DIST_PATH, 'index.html'));
+  });
+}
+
 // Socket.io connection
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -122,4 +141,7 @@ if (recoveredCampaigns > 0) {
 }
 server.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
+  if (hasFrontendBuild) {
+    console.log(`Serving frontend build from ${FRONTEND_DIST_PATH}`);
+  }
 });

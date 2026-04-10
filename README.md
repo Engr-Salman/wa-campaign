@@ -78,6 +78,39 @@ This starts:
 
 Open `http://localhost:5173` in your browser.
 
+## Hostinger Deployment
+
+This repository is now prepared for single-app Node deployment:
+
+- the frontend is built with Vite
+- the backend serves the built frontend from `frontend/dist`
+- the app starts with a single process: `node backend/index.js`
+
+Recommended Hostinger settings:
+
+- Framework preset: `Other`
+- Node version: `22.x`
+- Root directory: the uploaded project root
+- Build command: `npm run build`
+- Start command: `npm start`
+
+Environment variables to set in Hostinger:
+
+- `PORT`
+- `FRONTEND_URL`
+- `JWT_SECRET`
+- `EMAIL_FROM`
+- `EMAIL_USER`
+- `EMAIL_APP_PASSWORD`
+- `PUPPETEER_EXECUTABLE_PATH` if Hostinger requires an explicit Chromium path
+
+Important notes:
+
+- `npm install` at the root will trigger `postinstall`, which installs both backend and frontend dependencies
+- if you deploy from a ZIP, make sure the ZIP root contains `package.json`, `backend/`, and `frontend/`
+- if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer
+- runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
+
 ## Auth Flow
 
 ### Register

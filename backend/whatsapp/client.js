@@ -3,6 +3,7 @@ const path = require('path');
 
 let io = null;
 const sessions = new Map();
+const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
 
 function getRoom(userId) {
   return `user:${userId}`;
@@ -72,6 +73,7 @@ function initClient(socketIo, userId) {
     }),
     puppeteer: {
       headless: true,
+      ...(executablePath ? { executablePath } : {}),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
