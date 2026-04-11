@@ -48,6 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package-lock.json ./backend/
 COPY frontend/package.json frontend/package-lock.json ./frontend/
+COPY scripts ./scripts/
+COPY backend/scripts ./backend/scripts/
 
 RUN npm install
 
