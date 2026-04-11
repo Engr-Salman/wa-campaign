@@ -10,6 +10,26 @@ export const API_BASE_URL =
 export const SOCKET_URL =
   socketUrlFromEnv || API_BASE_URL || window.location.origin;
 
+// Warn at startup if VITE_API_BASE_URL was accidentally set to this site's own
+// URL.  When that happens every /api/* request hits the Netlify CDN, gets
+// matched by the SPA catch-all redirect, and returns index.html instead of
+// JSON — causing the "Unexpected end of JSON" / HTML error below.
+if (typeof window !== 'undefined' && apiBaseFromEnv) {
+  try {
+    const configuredOrigin = new URL(apiBaseFromEnv).origin;
+    if (configuredOrigin === window.location.origin) {
+      console.error(
+        '[WA Campaign] VITE_API_BASE_URL is set to this site\'s own origin ' +
+        `(${apiBaseFromEnv}). It must point to your BACKEND server, not this ` +
+        'frontend. Clear VITE_API_BASE_URL in Netlify and use BACKEND_URL instead — ' +
+        'see netlify.toml for setup instructions.'
+      );
+    }
+  } catch {
+    // invalid URL — ignore, will surface as a network error anyway
+  }
+}
+
 export function apiUrl(path) {
   if (!path) return API_BASE_URL || '/';
   if (/^https?:\/\//i.test(path)) return path;
@@ -35,10 +55,30 @@ export async function readJsonResponse(response) {
     return JSON.parse(text);
   } catch (error) {
     if (looksLikeHtml(text)) {
-      const configuredApiBase = API_BASE_URL || '(not set)';
-      throw new Error(
-        `Backend API is not reachable from this frontend. Configure VITE_API_BASE_URL (current: ${configuredApiBase}) and redeploy.`
-      );
+      // Detect the common Netlify misconfiguration: VITE_API_BASE_URL pointing
+      // to the frontend origin instead of the backend.
+      let hint;
+      if (
+        apiBaseFromEnv &&
+        typeof window !== 'undefined' &&
+        (() => {
+          try { return new URL(apiBaseFromEnv).origin === window.location.origin; }
+          catch { return false; }
+        })()
+      ) {
+        hint =
+          `VITE_API_BASE_URL is set to this site's own URL (${apiBaseFromEnv}). ` +
+          'That makes API requests loop back to the frontend — the backend is never reached. ' +
+          'Fix: remove VITE_API_BASE_URL from Netlify and set BACKEND_URL to your backend URL instead ' +
+          '(e.g. https://wa-backend.up.railway.app). See netlify.toml for full instructions.';
+      } else {
+        const where = API_BASE_URL || '(same origin — no BACKEND_URL proxy configured)';
+        hint =
+          `Backend API is not reachable. The frontend is trying to reach: ${where}. ` +
+          'Make sure BACKEND_URL and VITE_SOCKET_URL are set in Netlify to your backend URL, ' +
+          'and that the backend server is running.';
+      }
+      throw new Error(hint);
     }
     const fallbackMessage =
       text.trim() || `Request failed with status ${response.status}`;
