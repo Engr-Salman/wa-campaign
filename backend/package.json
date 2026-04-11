@@ -4,6 +4,7 @@
   "description": "Backend for WhatsApp Bulk Messaging Tool",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/install-browser.js",
     "start": "node --experimental-sqlite index.js",
     "dev": "node --experimental-sqlite index.js"
   },

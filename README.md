@@ -102,11 +102,13 @@ Environment variables to set in Hostinger:
 - `EMAIL_FROM`
 - `EMAIL_USER`
 - `EMAIL_APP_PASSWORD`
+- `PUPPETEER_CACHE_DIR`
 - `PUPPETEER_EXECUTABLE_PATH` if Hostinger requires an explicit Chromium path
 
 Important notes:
 
 - `npm install` at the root will trigger `postinstall`, which installs both backend and frontend dependencies
+- backend postinstall attempts to install a Puppeteer-managed Chrome binary into `backend/.cache/puppeteer`
 - if you deploy from a ZIP, make sure the ZIP root contains `package.json`, `backend/`, and `frontend/`
 - the app now uses Node's built-in `node:sqlite` module, so Node `22.x` is required
 - if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer

@@ -5,6 +5,16 @@ const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
+const defaultPuppeteerCacheDir = path.join(
+  __dirname,
+  '..',
+  '.cache',
+  'puppeteer'
+);
+
+if (!process.env.PUPPETEER_CACHE_DIR) {
+  process.env.PUPPETEER_CACHE_DIR = defaultPuppeteerCacheDir;
+}
 
 function resolveExecutablePath() {
   const explicitPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
