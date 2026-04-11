@@ -8,7 +8,7 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "build": "npm --prefix frontend run build",
+    "build": "node scripts/gen-redirects.js && npm --prefix frontend run build",
     "start": "node --experimental-sqlite backend/index.js",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && node --experimental-sqlite index.js",
