@@ -113,6 +113,7 @@ Important notes:
 - the app now uses Node's built-in `node:sqlite` module, so Node `22.x` is required
 - if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer
 - runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
+- if you set `PUPPETEER_CACHE_DIR`, use an absolute path only; relative paths can break between build and runtime
 
 ## Auth Flow
 

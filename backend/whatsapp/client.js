@@ -1,19 +1,58 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
-const defaultPuppeteerCacheDir = path.join(
-  __dirname,
-  '..',
-  '.cache',
-  'puppeteer'
-);
+const defaultPuppeteerCacheDir = path.join(__dirname, '..', '.cache', 'puppeteer');
 
-if (!process.env.PUPPETEER_CACHE_DIR) {
-  process.env.PUPPETEER_CACHE_DIR = defaultPuppeteerCacheDir;
+function resolveCacheDir() {
+  const envPath = process.env.PUPPETEER_CACHE_DIR;
+  if (envPath && path.isAbsolute(envPath)) {
+    return envPath;
+  }
+  if (envPath && !path.isAbsolute(envPath)) {
+    console.warn(
+      `[puppeteer] Ignoring relative PUPPETEER_CACHE_DIR (${envPath}). Using absolute fallback: ${defaultPuppeteerCacheDir}`
+    );
+  }
+  return defaultPuppeteerCacheDir;
+}
+
+const puppeteerCacheDir = resolveCacheDir();
+process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
+
+function installChromeIfMissing() {
+  let cliPath;
+  try {
+    cliPath = require.resolve('puppeteer/lib/cjs/puppeteer/node/cli.js');
+  } catch {
+    return;
+  }
+
+  fs.mkdirSync(puppeteerCacheDir, { recursive: true });
+  const result = spawnSync(
+    process.execPath,
+    [cliPath, 'browsers', 'install', 'chrome'],
+    {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        PUPPETEER_CACHE_DIR: puppeteerCacheDir,
+        PUPPETEER_SKIP_DOWNLOAD: 'false',
+      },
+    }
+  );
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim();
+    const stdout = result.stdout?.toString().trim();
+    console.warn('[puppeteer] Runtime Chrome install failed.');
+    if (stderr) console.warn(stderr);
+    if (stdout) console.warn(stdout);
+  }
 }
 
 function resolveExecutablePath() {
@@ -38,6 +77,17 @@ function resolveExecutablePath() {
     }
   } catch {
     // Continue without executablePath and let runtime report an actionable error.
+  }
+
+  // Self-heal for environments where build-time cache path and runtime path differ.
+  installChromeIfMissing();
+  try {
+    const installedPath = puppeteer.executablePath();
+    if (installedPath && fs.existsSync(installedPath)) {
+      return { executablePath: installedPath, source: 'puppeteer-runtime-install' };
+    }
+  } catch {
+    // keep falling back
   }
 
   return { executablePath: undefined, source: 'auto' };
