@@ -163,10 +163,67 @@ function getSession(userId) {
       info: null,
       qr: null,
       initializing: false,
+      initPromise: null,
     });
   }
 
   return sessions.get(userId);
+}
+
+function getAuthSessionDir(userId) {
+  return path.join(WWEBJS_DIR, `session-user-${userId}`);
+}
+
+function cleanupSessionLocks(userId) {
+  const sessionDir = getAuthSessionDir(userId);
+  const staleFiles = [
+    'SingletonLock',
+    'SingletonSocket',
+    'SingletonCookie',
+    'DevToolsActivePort',
+  ];
+
+  for (const fileName of staleFiles) {
+    const filePath = path.join(sessionDir, fileName);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      console.warn(`[whatsapp] Failed to remove stale lock file ${filePath}:`, error.message);
+    }
+  }
+}
+
+function cleanupStaleBrowserProcesses(userId) {
+  if (process.platform === 'win32') {
+    return;
+  }
+
+  const sessionDir = getAuthSessionDir(userId);
+  try {
+    const result = spawnSync('sh', ['-lc', `ps -eo pid=,args= | grep -F "${sessionDir}" | grep -E "chrome|chromium" | grep -v grep || true`], {
+      encoding: 'utf8',
+    });
+    const output = result.stdout || '';
+    const pids = output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split(/\s+/, 1)[0])
+      .filter(Boolean);
+
+    for (const pid of pids) {
+      const killResult = spawnSync('kill', ['-9', pid], { encoding: 'utf8' });
+      if (killResult.status === 0) {
+        console.warn(`[whatsapp] Killed stale browser process ${pid} for user ${userId}`);
+      }
+    }
+  } catch (error) {
+    console.warn(`[whatsapp] Failed to clean stale browser processes for user ${userId}:`, error.message);
+  }
+
+  cleanupSessionLocks(userId);
 }
 
 function emitStatus(userId, extra = {}) {
@@ -205,8 +262,12 @@ function initClient(socketIo, userId) {
   io = socketIo;
   const session = getSession(userId);
 
+  if (session.initPromise) {
+    return session.initPromise;
+  }
+
   if (session.client || session.initializing) {
-    return session.client;
+    return Promise.resolve(session.client);
   }
 
   session.initializing = true;
@@ -215,6 +276,8 @@ function initClient(socketIo, userId) {
   if (warning) {
     console.warn(`WhatsApp browser path warning for user ${userId}: ${warning}`);
   }
+
+  cleanupStaleBrowserProcesses(userId);
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -253,6 +316,7 @@ function initClient(socketIo, userId) {
 
   client.on('auth_failure', (msg) => {
     session.initializing = false;
+    session.initPromise = null;
     session.status = 'auth_failure';
     session.info = null;
     session.qr = null;
@@ -262,6 +326,7 @@ function initClient(socketIo, userId) {
 
   client.on('ready', () => {
     session.initializing = false;
+    session.initPromise = null;
     session.status = 'connected';
     session.qr = null;
     session.info = {
@@ -274,6 +339,7 @@ function initClient(socketIo, userId) {
 
   client.on('disconnected', (reason) => {
     session.initializing = false;
+    session.initPromise = null;
     session.status = 'disconnected';
     session.info = null;
     session.qr = null;
@@ -285,25 +351,42 @@ function initClient(socketIo, userId) {
     emitStatus(userId, { state });
   });
 
-  client.initialize().catch((err) => {
-    console.error(`WhatsApp client init error for user ${userId}:`, err);
-    session.initializing = false;
-    session.client = null;
-    session.status = 'error';
-    session.info = null;
-    session.qr = null;
-    const troubleshootingHint = executablePath
-      ? undefined
-      : 'No valid Chromium executable was found. Set CHROMIUM_PATH or PUPPETEER_EXECUTABLE_PATH to a valid browser binary.';
+  session.initPromise = client.initialize()
+    .then(() => client)
+    .catch(async (err) => {
+      console.error(`WhatsApp client init error for user ${userId}:`, err);
+      session.initializing = false;
+      session.initPromise = null;
+      session.client = null;
+      session.status = 'error';
+      session.info = null;
+      session.qr = null;
 
-    emitStatus(userId, {
-      message: troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message,
-      executablePath: executablePath || null,
-      executablePathSource: source,
+      try {
+        await client.destroy();
+      } catch {
+        // ignore cleanup failure
+      }
+
+      const hasSessionDirLock =
+        typeof err.message === 'string' &&
+        err.message.includes('browser is already running for');
+      const troubleshootingHint = hasSessionDirLock
+        ? 'A stale WhatsApp browser session was detected. Retry in a few seconds. If it persists, restart the backend once.'
+        : executablePath
+          ? undefined
+          : 'No valid Chromium executable was found. Set CHROMIUM_PATH or PUPPETEER_EXECUTABLE_PATH to a valid browser binary.';
+
+      emitStatus(userId, {
+        message: troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message,
+        executablePath: executablePath || null,
+        executablePathSource: source,
+      });
+
+      return null;
     });
-  });
 
-  return client;
+  return session.initPromise;
 }
 
 async function ensureClient(userId) {
