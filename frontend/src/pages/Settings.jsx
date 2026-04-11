@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Save, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaign } from '../hooks/useCampaign';
+import { apiUrl } from '../lib/apiBase';
 
 const SAFE_LIMITS = {
   messages_per_minute: 8,
@@ -43,7 +44,7 @@ export default function Settings({ theme, setTheme }) {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/whatsapp/logout', {
+      await fetch(apiUrl('/api/whatsapp/logout'), {
         method: 'POST',
       });
       toast.success('Logged out from WhatsApp');

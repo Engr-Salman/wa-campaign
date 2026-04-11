@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { API_BASE } from '../lib/apiBase';
 
-const SOCKET_URL = window.location.hostname === 'localhost'
-  ? `http://${window.location.hostname}:3001`
-  : window.location.origin;
+// Resolve the Socket.io endpoint:
+// 1. If VITE_API_URL was set at build time, use that (prod on Netlify pointing
+//    to a separately-hosted backend).
+// 2. If running on localhost in dev, go straight to :3001.
+// 3. Otherwise fall back to the same origin (backend + frontend on one host).
+const SOCKET_URL =
+  API_BASE ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? `http://${window.location.hostname}:3001`
+    : (typeof window !== 'undefined' ? window.location.origin : ''));
 
 export function useSocket() {
   const socketRef = useRef(null);

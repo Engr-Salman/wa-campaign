@@ -17,20 +17,31 @@ const sender = require('./whatsapp/sender');
 const { authMiddleware } = require('./middleware/auth');
 
 const PORT = process.env.PORT || 3001;
+// Comma-separated list of allowed origins. Supports e.g.
+//   FRONTEND_URL=http://localhost:5173,https://my-site.netlify.app
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const allowedOrigins = FRONTEND_URL.split(',').map((s) => s.trim()).filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Allow non-browser clients (curl, mobile, same-origin) with no Origin header.
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+};
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: FRONTEND_URL,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  },
+  cors: corsOptions,
 });
 
 // Middleware
-app.use(cors({ origin: FRONTEND_URL }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 

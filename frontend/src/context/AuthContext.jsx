@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../lib/apiBase';
 
 const AuthContext = createContext(null);
 
@@ -20,7 +21,10 @@ export function AuthProvider({ children }) {
     if (!(options.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, { ...options, headers });
+    // Prefix relative /api paths with the configured API base so the same code
+    // works both with the Vite dev proxy and against a remote backend in prod.
+    const finalUrl = url.startsWith('/') ? apiUrl(url) : url;
+    const res = await fetch(finalUrl, { ...options, headers });
     if (res.status === 401) {
       logout();
       throw new Error('Session expired');
