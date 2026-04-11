@@ -257,6 +257,44 @@ wa-campaign/
 - Interrupted running campaigns are recovered to `paused` state on restart
 - Uploaded runtime files such as `data.db-wal` and `data.db-shm` may appear during local execution
 
+## Deployment
+
+### Frontend on Netlify
+
+Only the React frontend can be hosted on Netlify. The backend needs a
+long-running process (Puppeteer/Chromium for WhatsApp Web, SQLite on disk,
+persistent uploads) and **will not run on Netlify Functions**.
+
+1. In Netlify, import this repository. The included `netlify.toml` already
+   configures:
+   - `base = "frontend"`
+   - `command = "npm install && npm run build"`
+   - `publish = "dist"`
+   - SPA fallback redirect to `/index.html`
+2. Deploy your backend separately (Railway, Render, Fly.io, or a VPS).
+3. In **Netlify → Site settings → Environment variables**, add:
+
+   ```
+   VITE_API_URL = https://<your-backend-host>
+   ```
+
+   Trigger a redeploy. Vite will bake this URL into the build, so every
+   `/api/*` call and the Socket.io connection target it.
+4. On the backend, set `FRONTEND_URL` to your Netlify origin (you can pass
+   multiple comma-separated origins):
+
+   ```
+   FRONTEND_URL=http://localhost:5173,https://<your-site>.netlify.app
+   ```
+
+### Backend
+
+The backend is a stateful Node service — deploy it to any host that allows
+long-running processes with a writable filesystem (Railway, Render, Fly.io,
+DigitalOcean, a VPS, etc.). Make sure Chromium is available (most Node
+buildpacks install it automatically with `whatsapp-web.js`; otherwise set up
+a Dockerfile with `google-chrome-stable`).
+
 ## Disclaimer
 
 This project is provided for authorized business communication and internal tooling use only.
