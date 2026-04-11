@@ -19,6 +19,11 @@ export function apiUrl(path) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+function looksLikeHtml(text) {
+  const sample = (text || '').trim().slice(0, 200).toLowerCase();
+  return sample.startsWith('<!doctype html') || sample.startsWith('<html');
+}
+
 export async function readJsonResponse(response) {
   const text = await response.text();
 
@@ -29,6 +34,12 @@ export async function readJsonResponse(response) {
   try {
     return JSON.parse(text);
   } catch (error) {
+    if (looksLikeHtml(text)) {
+      const configuredApiBase = API_BASE_URL || '(not set)';
+      throw new Error(
+        `Backend API is not reachable from this frontend. Configure VITE_API_BASE_URL (current: ${configuredApiBase}) and redeploy.`
+      );
+    }
     const fallbackMessage =
       text.trim() || `Request failed with status ${response.status}`;
 
