@@ -66,6 +66,24 @@ const io = new Server(server, {
   },
 });
 
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] Received ${signal}. Shutting down gracefully...`);
+
+  server.close(() => {
+    console.log('[server] HTTP server closed.');
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.warn('[server] Forced shutdown after timeout.');
+    process.exit(1);
+  }, 10000).unref();
+}
+
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
@@ -170,3 +188,6 @@ server.listen(PORT, () => {
     console.log(`Serving frontend build from ${FRONTEND_DIST_PATH}`);
   }
 });
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
