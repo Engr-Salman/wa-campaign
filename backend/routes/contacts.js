@@ -5,11 +5,11 @@ const path = require('path');
 const fs = require('fs');
 const { parseCSV, parseExcel } = require('../utils/csvParser');
 const { authMiddleware } = require('../middleware/auth');
+const { UPLOADS_DIR: uploadsDir } = require('../utils/paths');
 
 router.use(authMiddleware);
 
 // Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }

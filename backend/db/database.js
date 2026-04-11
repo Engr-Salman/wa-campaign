@@ -1,8 +1,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const crypto = require('crypto');
-
-const DB_PATH = path.join(__dirname, '..', '..', 'data.db');
+const { DB_PATH } = require('../utils/paths');
 
 let db;
 

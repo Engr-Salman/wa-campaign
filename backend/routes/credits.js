@@ -5,9 +5,9 @@ const fs = require('fs');
 const router = express.Router();
 const db = require('../db/database');
 const { authMiddleware } = require('../middleware/auth');
+const { RECEIPTS_DIR: receiptsDir } = require('../utils/paths');
 
 // Ensure receipts directory exists
-const receiptsDir = path.join(__dirname, '..', '..', 'uploads', 'receipts');
 if (!fs.existsSync(receiptsDir)) {
   fs.mkdirSync(receiptsDir, { recursive: true });
 }

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const puppeteer = require('puppeteer');
+const { WWEBJS_DIR } = require('../utils/paths');
 
 let io = null;
 const sessions = new Map();
@@ -218,7 +219,7 @@ function initClient(socketIo, userId) {
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: `user-${userId}`,
-      dataPath: path.join(__dirname, '..', '..', '.wwebjs_auth'),
+      dataPath: WWEBJS_DIR,
     }),
     puppeteer: {
       headless: true,
