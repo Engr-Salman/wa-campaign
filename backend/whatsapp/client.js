@@ -1,24 +1,36 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
+const fs = require('fs');
 const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
 
 function resolveExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
+  const explicitPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
 
-  if (process.env.CHROMIUM_PATH) {
-    return process.env.CHROMIUM_PATH;
+  if (explicitPath) {
+    if (fs.existsSync(explicitPath)) {
+      return { executablePath: explicitPath, source: 'env' };
+    }
+
+    return {
+      executablePath: undefined,
+      source: 'env',
+      warning: `Configured browser path does not exist: ${explicitPath}`,
+    };
   }
 
   try {
-    return puppeteer.executablePath();
+    const bundledPath = puppeteer.executablePath();
+    if (bundledPath && fs.existsSync(bundledPath)) {
+      return { executablePath: bundledPath, source: 'puppeteer' };
+    }
   } catch {
-    return undefined;
+    // Continue without executablePath and let runtime report an actionable error.
   }
+
+  return { executablePath: undefined, source: 'auto' };
 }
 
 function getRoom(userId) {
@@ -81,7 +93,10 @@ function initClient(socketIo, userId) {
 
   session.initializing = true;
   session.status = 'initializing';
-  const executablePath = resolveExecutablePath();
+  const { executablePath, source, warning } = resolveExecutablePath();
+  if (warning) {
+    console.warn(`WhatsApp browser path warning for user ${userId}: ${warning}`);
+  }
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -159,9 +174,14 @@ function initClient(socketIo, userId) {
     session.status = 'error';
     session.info = null;
     session.qr = null;
+    const troubleshootingHint = executablePath
+      ? undefined
+      : 'No valid Chromium executable was found. Set CHROMIUM_PATH or PUPPETEER_EXECUTABLE_PATH to a valid browser binary.';
+
     emitStatus(userId, {
-      message: err.message,
+      message: troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message,
       executablePath: executablePath || null,
+      executablePathSource: source,
     });
   });
 
