@@ -2,12 +2,39 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+function normalizeHomeDir(homeDir) {
+  if (!homeDir) return homeDir;
+  const marker = '/domains/';
+  const markerIndex = homeDir.indexOf(marker);
+  if (markerIndex > 0) {
+    return homeDir.slice(0, markerIndex);
+  }
+  return homeDir;
+}
+
+function normalizeCacheDir(cacheDir) {
+  if (!cacheDir) return cacheDir;
+  const marker = '/domains/';
+  if (cacheDir.includes(marker)) {
+    const homeRoot = cacheDir.slice(0, cacheDir.indexOf(marker));
+    return path.posix.join(homeRoot, '.cache', 'puppeteer');
+  }
+  return cacheDir;
+}
+
 function resolveCacheDir() {
   const envPath = process.env.PUPPETEER_CACHE_DIR;
   if (envPath && path.isAbsolute(envPath)) {
-    return envPath;
+    const normalized = normalizeCacheDir(envPath);
+    if (normalized !== envPath) {
+      console.warn(
+        `[puppeteer] Remapped PUPPETEER_CACHE_DIR from non-executable shared path ${envPath} to ${normalized}`
+      );
+    }
+    return normalized;
   }
-  const homeDir = process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..');
+  const rawHomeDir = process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..');
+  const homeDir = normalizeHomeDir(rawHomeDir);
   return path.join(homeDir, '.cache', 'puppeteer');
 }
 

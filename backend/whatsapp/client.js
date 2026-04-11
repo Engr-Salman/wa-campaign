@@ -6,8 +6,30 @@ const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
+
+function normalizeHomeDir(homeDir) {
+  if (!homeDir) return homeDir;
+  const marker = '/domains/';
+  const markerIndex = homeDir.indexOf(marker);
+  if (markerIndex > 0) {
+    return homeDir.slice(0, markerIndex);
+  }
+  return homeDir;
+}
+
+function normalizeCacheDir(cacheDir) {
+  if (!cacheDir) return cacheDir;
+  const marker = '/domains/';
+  if (cacheDir.includes(marker)) {
+    const homeRoot = cacheDir.slice(0, cacheDir.indexOf(marker));
+    return path.posix.join(homeRoot, '.cache', 'puppeteer');
+  }
+  return cacheDir;
+}
+
+const runtimeHomeDir = normalizeHomeDir(process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..'));
 const defaultPuppeteerCacheDir = path.join(
-  process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..'),
+  runtimeHomeDir,
   '.cache',
   'puppeteer'
 );
@@ -15,7 +37,13 @@ const defaultPuppeteerCacheDir = path.join(
 function resolveCacheDir() {
   const envPath = process.env.PUPPETEER_CACHE_DIR;
   if (envPath && path.isAbsolute(envPath)) {
-    return envPath;
+    const normalized = normalizeCacheDir(envPath);
+    if (normalized !== envPath) {
+      console.warn(
+        `[puppeteer] Remapped PUPPETEER_CACHE_DIR from non-executable shared path ${envPath} to ${normalized}`
+      );
+    }
+    return normalized;
   }
   if (envPath && !path.isAbsolute(envPath)) {
     console.warn(
@@ -27,6 +55,21 @@ function resolveCacheDir() {
 
 const puppeteerCacheDir = resolveCacheDir();
 process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
+
+function ensureExecutablePermission(executablePath) {
+  try {
+    fs.accessSync(executablePath, fs.constants.X_OK);
+    return executablePath;
+  } catch {
+    try {
+      fs.chmodSync(executablePath, 0o755);
+      fs.accessSync(executablePath, fs.constants.X_OK);
+      return executablePath;
+    } catch {
+      return executablePath;
+    }
+  }
+}
 
 function installChromeIfMissing() {
   let cliPath;
@@ -63,21 +106,28 @@ function resolveExecutablePath() {
   const explicitPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
 
   if (explicitPath) {
-    if (fs.existsSync(explicitPath)) {
-      return { executablePath: explicitPath, source: 'env' };
+    const normalizedExplicitPath = normalizeCacheDir(explicitPath);
+    if (normalizedExplicitPath !== explicitPath) {
+      console.warn(
+        `[puppeteer] Ignoring executable path under /domains/: ${explicitPath}. Using ${normalizedExplicitPath} instead.`
+      );
+    }
+
+    if (fs.existsSync(normalizedExplicitPath)) {
+      return { executablePath: ensureExecutablePermission(normalizedExplicitPath), source: 'env' };
     }
 
     return {
       executablePath: undefined,
       source: 'env',
-      warning: `Configured browser path does not exist: ${explicitPath}`,
+      warning: `Configured browser path does not exist: ${normalizedExplicitPath}`,
     };
   }
 
   try {
     const bundledPath = puppeteer.executablePath();
     if (bundledPath && fs.existsSync(bundledPath)) {
-      return { executablePath: bundledPath, source: 'puppeteer' };
+      return { executablePath: ensureExecutablePermission(bundledPath), source: 'puppeteer' };
     }
   } catch {
     // Continue without executablePath and let runtime report an actionable error.
@@ -88,7 +138,10 @@ function resolveExecutablePath() {
   try {
     const installedPath = puppeteer.executablePath();
     if (installedPath && fs.existsSync(installedPath)) {
-      return { executablePath: installedPath, source: 'puppeteer-runtime-install' };
+      return {
+        executablePath: ensureExecutablePermission(installedPath),
+        source: 'puppeteer-runtime-install',
+      };
     }
   } catch {
     // keep falling back

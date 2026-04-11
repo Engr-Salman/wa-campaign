@@ -114,6 +114,7 @@ Important notes:
 - if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer
 - runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
 - if you set `PUPPETEER_CACHE_DIR`, use an absolute path only; relative paths can break between build and runtime and are ignored by the app
+- if `PUPPETEER_CACHE_DIR` (or executable path vars) points to a `.../domains/...` path, the backend remaps it to `/home/<cpanel-user>/.cache/puppeteer` to avoid `EACCES` on shared hosting mounts
 
 ## Auth Flow
 
