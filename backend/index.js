@@ -24,15 +24,36 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const FRONTEND_DIST_PATH = path.join(__dirname, '..', 'frontend', 'dist');
 const hasFrontendBuild = require('fs').existsSync(FRONTEND_DIST_PATH);
 
+// Normalize each configured origin: trim whitespace and strip any trailing
+// slash so `https://example.com/` and `https://example.com` both work.
+function normalizeOrigin(origin) {
+  return (origin || '').trim().replace(/\/+$/, '');
+}
+
 const allowedOrigins = FRONTEND_URL
   .split(',')
-  .map((origin) => origin.trim())
+  .map(normalizeOrigin)
   .filter(Boolean);
+
+console.log('[cors] allowed origins:', allowedOrigins);
+
 function corsOrigin(origin, callback) {
-  if (!origin || allowedOrigins.includes(origin)) {
+  // Requests with no Origin header (curl, server-to-server, same-origin
+  // navigation) are always allowed.
+  if (!origin) return callback(null, true);
+
+  const normalized = normalizeOrigin(origin);
+  if (allowedOrigins.includes(normalized)) {
     return callback(null, true);
   }
-  return callback(new Error('Not allowed by CORS'));
+
+  // Log and return a non-crashing rejection so the preflight response is a
+  // clean CORS failure instead of a 500 from an unhandled error.
+  console.warn(
+    `[cors] rejected origin: "${origin}" (normalized: "${normalized}"). Allowed:`,
+    allowedOrigins,
+  );
+  return callback(null, false);
 }
 
 const app = express();
