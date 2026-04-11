@@ -1,53 +1,116 @@
 const nodemailer = require('nodemailer');
 
-const EMAIL_FROM = process.env.EMAIL_FROM || 'salman.ahm97@gmail.com';
+// ---------------------------------------------------------------------------
+// Email delivery
+// ---------------------------------------------------------------------------
+//
+// Railway (and most cloud PaaS) blocks outbound SMTP on ports 25/465/587 as a
+// spam-prevention policy, so Gmail SMTP via nodemailer will time out there no
+// matter what we configure.  To keep email working in production we use
+// **Resend** (https://resend.com) — an HTTP-based transactional email API that
+// is not affected by SMTP blocks.
+//
+// Behavior:
+//   - If RESEND_API_KEY is set, send via Resend's HTTPS API.
+//   - Otherwise, fall back to Gmail SMTP via nodemailer (works locally and on
+//     any host that allows outbound SMTP).
+//
+// Configure in Railway:
+//   RESEND_API_KEY = re_xxxxxxxxxxxxxxxxxxxx
+//   EMAIL_FROM     = onboarding@resend.dev      (sandbox sender, no domain
+//                                                verification required — good
+//                                                for testing)
+//   or EMAIL_FROM  = no-reply@your-verified-domain.com
+// ---------------------------------------------------------------------------
+
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+// `onboarding@resend.dev` is Resend's shared sandbox sender that works
+// immediately after signup without any domain verification.  Swap it out for a
+// sender on your own verified domain once you're ready.
+const EMAIL_FROM =
+  process.env.EMAIL_FROM ||
+  (RESEND_API_KEY ? 'onboarding@resend.dev' : 'salman.ahm97@gmail.com');
+
 const EMAIL_USER = process.env.EMAIL_USER || EMAIL_FROM;
 // Gmail App Passwords are displayed with spaces (`xxxx xxxx xxxx xxxx`) but
 // must be sent to SMTP without them.  Strip all whitespace just in case.
 const EMAIL_APP_PASSWORD = (process.env.EMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
 
+// ---------------------------------------------------------------------------
+// Resend (HTTP) transport
+// ---------------------------------------------------------------------------
+
+let resendClient;
+function getResendClient() {
+  if (!resendClient) {
+    const { Resend } = require('resend');
+    resendClient = new Resend(RESEND_API_KEY);
+    console.log('[mailer] Using Resend HTTP API for email delivery.');
+  }
+  return resendClient;
+}
+
+async function sendViaResend({ to, subject, text, html }) {
+  const client = getResendClient();
+  const { data, error } = await client.emails.send({
+    from: EMAIL_FROM,
+    to,
+    subject,
+    text,
+    html,
+  });
+  if (error) {
+    console.error('[mailer] Resend send failed:', error);
+    const err = new Error(error.message || 'Resend send failed');
+    err.code = error.name || 'RESEND_ERROR';
+    throw err;
+  }
+  console.log('[mailer] Resend send ok:', data && data.id);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Gmail SMTP (nodemailer) transport — local dev fallback
+// ---------------------------------------------------------------------------
+
 let transporter;
 
 function getTransporter() {
   if (!EMAIL_APP_PASSWORD) {
-    throw new Error('Email service is not configured. Set EMAIL_APP_PASSWORD in .env');
+    throw new Error(
+      'Email service is not configured. Set RESEND_API_KEY (recommended for production) or EMAIL_APP_PASSWORD (local dev via Gmail SMTP).',
+    );
   }
 
   if (!transporter) {
-    // Use explicit SMTP host/port instead of `service: 'gmail'`.
-    //
-    // - Port 587 with STARTTLS is far more reliable on cloud hosts like
-    //   Railway / Render than the default 465 SMTPS (some providers block
-    //   or throttle 465 outbound).
-    // - Explicit timeouts prevent the request from hanging for minutes if
-    //   the SMTP connection can't be established — we fail fast and surface
-    //   a real error instead of "Connection timeout" from the HTTP proxy.
     transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
-      secure: false,       // STARTTLS upgrade
+      secure: false, // STARTTLS upgrade
       requireTLS: true,
       auth: {
         user: EMAIL_USER,
         pass: EMAIL_APP_PASSWORD,
       },
-      connectionTimeout: 15000, // 15s to open TCP connection
-      greetingTimeout:   15000, // 15s to receive SMTP greeting
-      socketTimeout:     20000, // 20s for each read/write
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
 
-    // Verify once at startup so credential / network problems show up in
-    // the Railway logs immediately instead of on the first register call.
     transporter.verify().then(
       () => console.log('[mailer] SMTP transporter verified and ready.'),
-      (err) => console.error('[mailer] SMTP verify failed:', err && err.message ? err.message : err),
+      (err) =>
+        console.error(
+          '[mailer] SMTP verify failed:',
+          err && err.message ? err.message : err,
+        ),
     );
   }
 
   return transporter;
 }
 
-async function sendMail({ to, subject, text, html }) {
+async function sendViaSmtp({ to, subject, text, html }) {
   const mailer = getTransporter();
   try {
     await mailer.sendMail({
@@ -58,13 +121,22 @@ async function sendMail({ to, subject, text, html }) {
       html,
     });
   } catch (err) {
-    // Surface the real SMTP error in the Railway logs so we can diagnose
-    // connection / auth problems without guessing.
     console.error('[mailer] sendMail failed:', err && err.message ? err.message : err);
     if (err && err.code) console.error('[mailer] error code:', err.code);
     if (err && err.response) console.error('[mailer] server response:', err.response);
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+async function sendMail(opts) {
+  if (RESEND_API_KEY) {
+    return sendViaResend(opts);
+  }
+  return sendViaSmtp(opts);
 }
 
 async function sendVerificationEmail(email, name, code) {
