@@ -54,7 +54,7 @@ Required variables:
 | Variable | Example | Purpose |
 |---|---|---|
 | `PORT` | `3001` | Backend server port |
-| `FRONTEND_URL` | `http://localhost:5173` | Frontend origin for CORS |
+| `FRONTEND_URL` | `http://localhost:5173,https://bulkwasender.netlify.app` | Comma-separated frontend origins for CORS |
 | `JWT_SECRET` | `change-this-to-a-random-secret-key` | JWT signing secret |
 | `EMAIL_FROM` | `salman.ahm97@gmail.com` | Sender address shown in outgoing emails |
 | `EMAIL_USER` | `salman.ahm97@gmail.com` | Gmail account used for SMTP |
@@ -107,7 +107,9 @@ Environment variables to set in Hostinger:
 
 Important notes:
 
-- `npm install` at the root will trigger `postinstall`, which installs both backend and frontend dependencies
+- `npm install` at the root triggers a smart `postinstall`:
+  - on Netlify: installs frontend dependencies only
+  - elsewhere: installs both backend and frontend dependencies
 - backend postinstall installs a Puppeteer-managed Chrome binary into `$HOME/.cache/puppeteer` by default (for Hostinger this is typically `/home/<cpanel-user>/.cache/puppeteer`)
 - if you deploy from a ZIP, make sure the ZIP root contains `package.json`, `backend/`, and `frontend/`
 - the app now uses Node's built-in `node:sqlite` module, so Node `22.x` is required
@@ -115,6 +117,26 @@ Important notes:
 - runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
 - if you set `PUPPETEER_CACHE_DIR`, use an absolute path only; relative paths can break between build and runtime and are ignored by the app
 - if `PUPPETEER_CACHE_DIR` (or executable path vars) points to a `.../domains/...` path, the backend remaps it to `/home/<cpanel-user>/.cache/puppeteer` to avoid `EACCES` on shared hosting mounts
+
+## Netlify Deployment
+
+Netlify can host the frontend, but it cannot run this app's long-running WhatsApp backend process reliably (Chromium + persistent sessions + Socket.IO + local SQLite state).
+
+Use this production split:
+
+- Frontend on Netlify
+- Backend on a Node host (Hostinger VPS/Node app, Railway, Render, etc.)
+
+This repo includes `netlify.toml` and frontend env support for that setup.
+
+Netlify environment variables:
+
+- `VITE_API_BASE_URL=https://your-backend-domain.com`
+- `VITE_SOCKET_URL=https://your-backend-domain.com`
+
+Backend environment for CORS:
+
+- `FRONTEND_URL=https://bulkwasender.netlify.app`
 
 ## Auth Flow
 

@@ -1,3 +1,24 @@
+const trimTrailingSlash = (value) => (value ? value.replace(/\/+$/, '') : value);
+
+const apiBaseFromEnv = trimTrailingSlash(import.meta.env.VITE_API_BASE_URL);
+const socketUrlFromEnv = trimTrailingSlash(import.meta.env.VITE_SOCKET_URL);
+const localApiBase = `http://${window.location.hostname}:3001`;
+
+export const API_BASE_URL =
+  apiBaseFromEnv || (window.location.hostname === 'localhost' ? localApiBase : '');
+
+export const SOCKET_URL =
+  socketUrlFromEnv || API_BASE_URL || window.location.origin;
+
+export function apiUrl(path) {
+  if (!path) return API_BASE_URL || '/';
+  if (/^https?:\/\//i.test(path)) return path;
+  if (!path.startsWith('/')) {
+    throw new Error(`apiUrl expected an absolute path, received: ${path}`);
+  }
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 export async function readJsonResponse(response) {
   const text = await response.text();
 

@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
-
-const SOCKET_URL = window.location.hostname === 'localhost'
-  ? `http://${window.location.hostname}:3001`
-  : window.location.origin;
+import { SOCKET_URL } from '../utils/api';
 
 export function useSocket() {
   const { token } = useAuth();

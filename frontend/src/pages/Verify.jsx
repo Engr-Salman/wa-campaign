@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { ShieldCheck, Mail, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { readJsonResponse } from '../utils/api';
+import { apiUrl, readJsonResponse } from '../utils/api';
 
 export default function Verify() {
   const location = useLocation();
@@ -22,7 +22,7 @@ export default function Verify() {
     setSubmitting(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/verify', {
+      const res = await fetch(apiUrl('/api/auth/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code }),
@@ -42,7 +42,7 @@ export default function Verify() {
 
   const handleResend = async () => {
     try {
-      const res = await fetch('/api/auth/resend-verification', {
+      const res = await fetch(apiUrl('/api/auth/resend-verification'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),

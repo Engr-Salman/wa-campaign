@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { MessageCircle, UserPlus, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { readJsonResponse } from '../utils/api';
+import { apiUrl, readJsonResponse } from '../utils/api';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export default function Register() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(apiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),

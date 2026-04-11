@@ -23,7 +23,10 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const FRONTEND_DIST_PATH = path.join(__dirname, '..', 'frontend', 'dist');
 const hasFrontendBuild = require('fs').existsSync(FRONTEND_DIST_PATH);
 
-const allowedOrigins = [FRONTEND_URL].filter(Boolean);
+const allowedOrigins = FRONTEND_URL
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 function corsOrigin(origin, callback) {
   if (!origin || allowedOrigins.includes(origin)) {
     return callback(null, true);

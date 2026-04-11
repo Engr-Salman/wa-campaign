@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { readJsonResponse } from '../utils/api';
+import { apiUrl, readJsonResponse } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -21,7 +21,8 @@ export function AuthProvider({ children }) {
     if (!(options.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, { ...options, headers });
+    const requestUrl = /^https?:\/\//i.test(url) ? url : apiUrl(url);
+    const res = await fetch(requestUrl, { ...options, headers });
     if (res.status === 401) {
       logout();
       throw new Error('Session expired');

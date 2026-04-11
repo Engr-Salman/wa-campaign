@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { MessageCircle, LogIn, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { readJsonResponse } from '../utils/api';
+import { apiUrl, readJsonResponse } from '../utils/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -19,7 +19,7 @@ export default function Login() {
     setSubmitting(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
