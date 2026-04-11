@@ -7,7 +7,8 @@ function resolveCacheDir() {
   if (envPath && path.isAbsolute(envPath)) {
     return envPath;
   }
-  return path.join(__dirname, '..', '.cache', 'puppeteer');
+  const homeDir = process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..');
+  return path.join(homeDir, '.cache', 'puppeteer');
 }
 
 const cacheDir = resolveCacheDir();

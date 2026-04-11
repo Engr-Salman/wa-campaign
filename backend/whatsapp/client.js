@@ -6,7 +6,11 @@ const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
-const defaultPuppeteerCacheDir = path.join(__dirname, '..', '.cache', 'puppeteer');
+const defaultPuppeteerCacheDir = path.join(
+  process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..'),
+  '.cache',
+  'puppeteer'
+);
 
 function resolveCacheDir() {
   const envPath = process.env.PUPPETEER_CACHE_DIR;

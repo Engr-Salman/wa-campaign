@@ -108,12 +108,12 @@ Environment variables to set in Hostinger:
 Important notes:
 
 - `npm install` at the root will trigger `postinstall`, which installs both backend and frontend dependencies
-- backend postinstall attempts to install a Puppeteer-managed Chrome binary into `backend/.cache/puppeteer`
+- backend postinstall installs a Puppeteer-managed Chrome binary into `$HOME/.cache/puppeteer` by default (for Hostinger this is typically `/home/<cpanel-user>/.cache/puppeteer`)
 - if you deploy from a ZIP, make sure the ZIP root contains `package.json`, `backend/`, and `frontend/`
 - the app now uses Node's built-in `node:sqlite` module, so Node `22.x` is required
 - if WhatsApp fails to initialize in production, the most likely issue is Chromium availability for Puppeteer
 - runtime data like `data.db`, `uploads/`, and `.wwebjs_auth/` must remain writable on the host
-- if you set `PUPPETEER_CACHE_DIR`, use an absolute path only; relative paths can break between build and runtime
+- if you set `PUPPETEER_CACHE_DIR`, use an absolute path only; relative paths can break between build and runtime and are ignored by the app
 
 ## Auth Flow
 
