@@ -15,7 +15,7 @@ import MessageComposer from '../components/MessageComposer';
 import { useCampaign } from '../hooks/useCampaign';
 import { useAuth } from '../context/AuthContext';
 
-export default function NewCampaign({ waStatus, waInfo, qrCode }) {
+export default function NewCampaign({ waStatus, waInfo, waMessage, qrCode }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { uploadContacts, uploadMedia, createCampaign, startCampaign } =
@@ -114,7 +114,7 @@ export default function NewCampaign({ waStatus, waInfo, qrCode }) {
     return (
       <div className="max-w-lg mx-auto">
         <h1 className="text-2xl font-bold mb-6">Connect WhatsApp First</h1>
-        <QRCodeLogin qrCode={qrCode} status={waStatus} info={waInfo} />
+        <QRCodeLogin qrCode={qrCode} status={waStatus} info={waInfo} message={waMessage} />
       </div>
     );
   }

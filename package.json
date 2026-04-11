@@ -3,9 +3,15 @@
   "version": "1.0.0",
   "description": "WhatsApp Bulk Message Automation Tool",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "build": "npm --prefix frontend run build",
+    "start": "node --experimental-sqlite backend/index.js",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && node index.js",
+    "dev:backend": "cd backend && node --experimental-sqlite index.js",
     "dev:frontend": "cd frontend && npx vite --host",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
   },

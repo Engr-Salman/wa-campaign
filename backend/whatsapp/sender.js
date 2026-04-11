@@ -1,19 +1,61 @@
 const waClient = require('./client');
-const rateLimiter = require('../utils/rateLimiter');
+const { RateLimiter } = require('../utils/rateLimiter');
 const db = require('../db/database');
 
-let activeCampaign = null;
-let activeUserId = null;
-let isPaused = false;
-let isStopped = false;
+const activeRunsByCampaign = new Map();
+const activeCampaignByUser = new Map();
 let io = null;
 
 function setIo(socketIo) {
   io = socketIo;
 }
 
-function getActiveCampaign() {
-  return activeCampaign;
+function getRun(campaignId) {
+  return activeRunsByCampaign.get(campaignId) || null;
+}
+
+function getActiveCampaign(campaignId) {
+  if (campaignId) {
+    const run = getRun(campaignId);
+    return run ? { campaignId: run.campaignId, userId: run.userId, status: run.status } : null;
+  }
+
+  return Array.from(activeRunsByCampaign.values()).map((run) => ({
+    campaignId: run.campaignId,
+    userId: run.userId,
+    status: run.status,
+  }));
+}
+
+function emitToCampaignUser(userId, event, payload) {
+  if (!io || !userId) return;
+  io.to(`user:${userId}`).emit(event, payload);
+}
+
+function createRun(campaignId, userId) {
+  const run = {
+    campaignId,
+    userId,
+    status: 'running',
+    isPaused: false,
+    isStopped: false,
+    rateLimiter: new RateLimiter(),
+  };
+
+  activeRunsByCampaign.set(campaignId, run);
+  activeCampaignByUser.set(userId, campaignId);
+  return run;
+}
+
+function clearRun(campaignId) {
+  const run = getRun(campaignId);
+  if (!run) return;
+
+  run.rateLimiter.reset();
+  activeRunsByCampaign.delete(campaignId);
+  if (activeCampaignByUser.get(run.userId) === campaignId) {
+    activeCampaignByUser.delete(run.userId);
+  }
 }
 
 function personalizeMessage(template, contact) {
@@ -31,76 +73,89 @@ async function startCampaign(campaignId, userId) {
   const campaign = db.getCampaign(campaignId);
   if (!campaign) throw new Error('Campaign not found');
 
-  if (waClient.getConnectionStatus() !== 'connected') {
+  const existingRun = getRun(campaignId);
+  if (existingRun?.status === 'running') {
+    throw new Error('Campaign is already running');
+  }
+
+  const otherCampaignId = activeCampaignByUser.get(userId);
+  if (otherCampaignId && otherCampaignId !== campaignId) {
+    throw new Error(`Campaign #${otherCampaignId} is already active for this user`);
+  }
+
+  const waStatus = waClient.getConnectionStatus(userId);
+  if (waStatus !== 'connected') {
     throw new Error('WhatsApp not connected');
   }
 
-  activeCampaign = campaignId;
-  activeUserId = userId;
-  isPaused = false;
-  isStopped = false;
+  const run = existingRun || createRun(campaignId, userId);
+  run.status = 'running';
+  run.isPaused = false;
+  run.isStopped = false;
 
   db.updateCampaignStatus(campaignId, 'running');
-  io.emit('campaign:status', { campaignId, status: 'running' });
+  emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'running' });
 
   const contacts = db.getPendingContacts(campaignId);
   const startTime = Date.now();
   let sentInSession = 0;
 
   for (let i = 0; i < contacts.length; i++) {
-    if (isStopped) {
+    if (run.isStopped) {
       db.updateCampaignStatus(campaignId, 'stopped');
-      io.emit('campaign:status', { campaignId, status: 'stopped' });
-      break;
+      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'stopped' });
+      clearRun(campaignId);
+      return;
     }
 
-    while (isPaused) {
+    while (run.isPaused) {
       await sleep(1000);
-      if (isStopped) break;
+      if (run.isStopped) break;
     }
-    if (isStopped) {
+
+    if (run.isStopped) {
       db.updateCampaignStatus(campaignId, 'stopped');
-      io.emit('campaign:status', { campaignId, status: 'stopped' });
-      break;
+      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'stopped' });
+      clearRun(campaignId);
+      return;
     }
 
     const contact = contacts[i];
-
     if (contact.status === 'invalid' || contact.status === 'skipped') {
       continue;
     }
 
-    // Check user has credits before sending
     const userCredits = db.getUserCredits(userId);
     if (userCredits < 1) {
-      isPaused = true;
-      io.emit('campaign:rate_limit', {
+      run.isPaused = true;
+      run.status = 'paused';
+      emitToCampaignUser(userId, 'campaign:rate_limit', {
         campaignId,
         reason: 'no_credits',
         delay: 0,
         resumeAt: null,
       });
       db.updateCampaignStatus(campaignId, 'paused');
-      io.emit('campaign:status', { campaignId, status: 'paused' });
-      break;
+      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'paused' });
+      return;
     }
 
-    // Rate limiting
-    const rateCheck = rateLimiter.getDelay();
+    const rateCheck = run.rateLimiter.getDelay();
     if (rateCheck.delay === -1) {
-      isPaused = true;
-      io.emit('campaign:rate_limit', {
+      run.isPaused = true;
+      run.status = 'paused';
+      emitToCampaignUser(userId, 'campaign:rate_limit', {
         campaignId,
         reason: rateCheck.reason,
         resumeAt: null,
       });
       db.updateCampaignStatus(campaignId, 'paused');
-      io.emit('campaign:status', { campaignId, status: 'paused' });
-      break;
+      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'paused' });
+      return;
     }
 
     if (rateCheck.delay > 0) {
-      io.emit('campaign:rate_limit', {
+      emitToCampaignUser(userId, 'campaign:rate_limit', {
         campaignId,
         reason: rateCheck.reason,
         delay: rateCheck.delay,
@@ -112,18 +167,16 @@ async function startCampaign(campaignId, userId) {
     const message = personalizeMessage(campaign.message, contact);
 
     try {
-      await waClient.sendMessage(contact.phone_number, message, campaign.media_path);
+      await waClient.sendMessage(userId, contact.phone_number, message, campaign.media_path);
 
-      // Deduct 1 credit
       db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
       db.incrementCampaignCreditsUsed(campaignId);
-
       db.updateContactStatus(contact.id, 'sent', null);
-      rateLimiter.recordSend();
+      run.rateLimiter.recordSend();
       sentInSession++;
 
       db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
-      io.emit('campaign:message_sent', {
+      emitToCampaignUser(userId, 'campaign:message_sent', {
         campaignId,
         contactId: contact.id,
         phone: contact.phone_number,
@@ -131,12 +184,12 @@ async function startCampaign(campaignId, userId) {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      const maxRetries = rateLimiter.getSettings().maxRetries;
+      const maxRetries = run.rateLimiter.getSettings().maxRetries;
 
       if (contact.retry_count < maxRetries) {
         db.incrementContactRetry(contact.id);
         const retryDelay = Math.pow(2, contact.retry_count) * 30000;
-        io.emit('campaign:message_retry', {
+        emitToCampaignUser(userId, 'campaign:message_retry', {
           campaignId,
           contactId: contact.id,
           phone: contact.phone_number,
@@ -146,16 +199,16 @@ async function startCampaign(campaignId, userId) {
         await sleep(retryDelay);
 
         try {
-          await waClient.sendMessage(contact.phone_number, message, campaign.media_path);
+          await waClient.sendMessage(userId, contact.phone_number, message, campaign.media_path);
 
           db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
           db.incrementCampaignCreditsUsed(campaignId);
-
           db.updateContactStatus(contact.id, 'sent', null);
-          rateLimiter.recordSend();
+          run.rateLimiter.recordSend();
           sentInSession++;
+
           db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
-          io.emit('campaign:message_sent', {
+          emitToCampaignUser(userId, 'campaign:message_sent', {
             campaignId,
             contactId: contact.id,
             phone: contact.phone_number,
@@ -165,7 +218,7 @@ async function startCampaign(campaignId, userId) {
         } catch (retryErr) {
           db.updateContactStatus(contact.id, 'failed', retryErr.message);
           db.addLog(campaignId, contact.id, contact.phone_number, 'failed', retryErr.message);
-          io.emit('campaign:message_failed', {
+          emitToCampaignUser(userId, 'campaign:message_failed', {
             campaignId,
             contactId: contact.id,
             phone: contact.phone_number,
@@ -177,7 +230,7 @@ async function startCampaign(campaignId, userId) {
       } else {
         db.updateContactStatus(contact.id, 'failed', err.message);
         db.addLog(campaignId, contact.id, contact.phone_number, 'failed', err.message);
-        io.emit('campaign:message_failed', {
+        emitToCampaignUser(userId, 'campaign:message_failed', {
           campaignId,
           contactId: contact.id,
           phone: contact.phone_number,
@@ -191,7 +244,7 @@ async function startCampaign(campaignId, userId) {
     db.updateCampaignCounts(campaignId);
     const updatedCampaign = db.getCampaign(campaignId);
     const elapsed = Date.now() - startTime;
-    const rate = sentInSession / (elapsed / 1000);
+    const rate = sentInSession / Math.max(elapsed / 1000, 1);
     const remaining =
       updatedCampaign.total_contacts -
       updatedCampaign.sent_count -
@@ -199,7 +252,7 @@ async function startCampaign(campaignId, userId) {
       updatedCampaign.skipped_count;
     const eta = rate > 0 ? remaining / rate : 0;
 
-    io.emit('campaign:progress', {
+    emitToCampaignUser(userId, 'campaign:progress', {
       campaignId,
       sent: updatedCampaign.sent_count,
       failed: updatedCampaign.failed_count,
@@ -210,33 +263,48 @@ async function startCampaign(campaignId, userId) {
     });
   }
 
-  if (!isStopped && !isPaused) {
-    db.updateCampaignCounts(campaignId);
-    db.updateCampaignStatus(campaignId, 'completed');
-    io.emit('campaign:status', { campaignId, status: 'completed' });
-  }
-
-  activeCampaign = null;
-  activeUserId = null;
+  db.updateCampaignCounts(campaignId);
+  db.updateCampaignStatus(campaignId, 'completed');
+  emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'completed' });
+  clearRun(campaignId);
 }
 
-function pauseCampaign() {
-  if (activeCampaign) {
-    isPaused = true;
-    db.updateCampaignStatus(activeCampaign, 'paused');
-    io.emit('campaign:status', { campaignId: activeCampaign, status: 'paused' });
-  }
+function pauseCampaign(campaignId, userId, isAdmin = false) {
+  const run = getRun(campaignId);
+  if (!run) return false;
+  if (!isAdmin && run.userId !== userId) return false;
+
+  run.isPaused = true;
+  run.status = 'paused';
+  db.updateCampaignStatus(campaignId, 'paused');
+  emitToCampaignUser(run.userId, 'campaign:status', { campaignId, status: 'paused' });
+  return true;
 }
 
 function resumeCampaign(campaignId, userId) {
-  isPaused = false;
-  if (!activeCampaign) {
-    startCampaign(campaignId, userId);
+  const run = getRun(campaignId);
+  if (!run) {
+    return startCampaign(campaignId, userId);
   }
+
+  if (run.userId !== userId) {
+    throw new Error('Campaign belongs to another user');
+  }
+
+  run.isPaused = false;
+  run.status = 'running';
+  db.updateCampaignStatus(campaignId, 'running');
+  emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'running' });
+  return true;
 }
 
-function stopCampaign() {
-  isStopped = true;
+function stopCampaign(campaignId, userId, isAdmin = false) {
+  const run = getRun(campaignId);
+  if (!run) return false;
+  if (!isAdmin && run.userId !== userId) return false;
+
+  run.isStopped = true;
+  return true;
 }
 
 async function retryFailed(campaignId, userId) {
@@ -251,4 +319,12 @@ async function retryFailed(campaignId, userId) {
   return startCampaign(campaignId, userId);
 }
 
-module.exports = { setIo, getActiveCampaign, startCampaign, pauseCampaign, resumeCampaign, stopCampaign, retryFailed };
+module.exports = {
+  setIo,
+  getActiveCampaign,
+  startCampaign,
+  pauseCampaign,
+  resumeCampaign,
+  stopCampaign,
+  retryFailed,
+};

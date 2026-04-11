@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Clock, Eye, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaign } from '../hooks/useCampaign';
+import { apiUrl } from '../utils/api';
 
 const statusBadge = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -90,7 +91,7 @@ export default function AdminCredits() {
                   <button
                     onClick={() => {
                       const filename = r.receipt_path.split('/').pop().split('\\').pop();
-                      setViewReceipt(`/api/admin/receipts/${filename}`);
+                      setViewReceipt(apiUrl(`/api/admin/receipts/${filename}`));
                     }}
                     className="btn-secondary text-sm py-1 flex items-center gap-1"
                   >

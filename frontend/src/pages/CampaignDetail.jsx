@@ -7,6 +7,7 @@ import ContactTable from '../components/ContactTable';
 import LogFeed from '../components/LogFeed';
 import RateLimitWarning from '../components/RateLimitWarning';
 import { useCampaign } from '../hooks/useCampaign';
+import { apiUrl } from '../utils/api';
 
 export default function CampaignDetail({ socket }) {
   const { id } = useParams();
@@ -139,7 +140,7 @@ export default function CampaignDetail({ socket }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold">Campaign Summary</h3>
             <a
-              href={`/api/campaigns/${id}/export`}
+              href={apiUrl(`/api/campaigns/${id}/export`)}
               className="btn-secondary flex items-center gap-2 text-sm"
             >
               <Download size={16} /> Export Results CSV

@@ -1,32 +1,228 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
+const fs = require('fs');
+const { spawnSync } = require('child_process');
+const puppeteer = require('puppeteer');
 
-let client = null;
 let io = null;
-let connectionStatus = 'disconnected';
-let clientInfo = null;
+const sessions = new Map();
 
-function getClient() {
-  return client;
+function normalizeHomeDir(homeDir) {
+  if (!homeDir) return homeDir;
+  const marker = '/domains/';
+  const markerIndex = homeDir.indexOf(marker);
+  if (markerIndex > 0) {
+    return homeDir.slice(0, markerIndex);
+  }
+  return homeDir;
 }
 
-function getConnectionStatus() {
-  return connectionStatus;
+function normalizeCacheDir(cacheDir) {
+  if (!cacheDir) return cacheDir;
+  const marker = '/domains/';
+  if (cacheDir.includes(marker)) {
+    const homeRoot = cacheDir.slice(0, cacheDir.indexOf(marker));
+    return path.posix.join(homeRoot, '.cache', 'puppeteer');
+  }
+  return cacheDir;
 }
 
-function getClientInfo() {
-  return clientInfo;
+const runtimeHomeDir = normalizeHomeDir(process.env.HOME || process.env.USERPROFILE || path.join(__dirname, '..'));
+const defaultPuppeteerCacheDir = path.join(
+  runtimeHomeDir,
+  '.cache',
+  'puppeteer'
+);
+
+function resolveCacheDir() {
+  const envPath = process.env.PUPPETEER_CACHE_DIR;
+  if (envPath && path.isAbsolute(envPath)) {
+    const normalized = normalizeCacheDir(envPath);
+    if (normalized !== envPath) {
+      console.warn(
+        `[puppeteer] Remapped PUPPETEER_CACHE_DIR from non-executable shared path ${envPath} to ${normalized}`
+      );
+    }
+    return normalized;
+  }
+  if (envPath && !path.isAbsolute(envPath)) {
+    console.warn(
+      `[puppeteer] Ignoring relative PUPPETEER_CACHE_DIR (${envPath}). Using absolute fallback: ${defaultPuppeteerCacheDir}`
+    );
+  }
+  return defaultPuppeteerCacheDir;
 }
 
-function initClient(socketIo) {
+const puppeteerCacheDir = resolveCacheDir();
+process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
+
+function ensureExecutablePermission(executablePath) {
+  try {
+    fs.accessSync(executablePath, fs.constants.X_OK);
+    return executablePath;
+  } catch {
+    try {
+      fs.chmodSync(executablePath, 0o755);
+      fs.accessSync(executablePath, fs.constants.X_OK);
+      return executablePath;
+    } catch {
+      return executablePath;
+    }
+  }
+}
+
+function installChromeIfMissing() {
+  let cliPath;
+  try {
+    cliPath = require.resolve('puppeteer/lib/cjs/puppeteer/node/cli.js');
+  } catch {
+    return;
+  }
+
+  fs.mkdirSync(puppeteerCacheDir, { recursive: true });
+  const result = spawnSync(
+    process.execPath,
+    [cliPath, 'browsers', 'install', 'chrome'],
+    {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        PUPPETEER_CACHE_DIR: puppeteerCacheDir,
+        PUPPETEER_SKIP_DOWNLOAD: 'false',
+      },
+    }
+  );
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim();
+    const stdout = result.stdout?.toString().trim();
+    console.warn('[puppeteer] Runtime Chrome install failed.');
+    if (stderr) console.warn(stderr);
+    if (stdout) console.warn(stdout);
+  }
+}
+
+function resolveExecutablePath() {
+  const explicitPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
+
+  if (explicitPath) {
+    const normalizedExplicitPath = normalizeCacheDir(explicitPath);
+    if (normalizedExplicitPath !== explicitPath) {
+      console.warn(
+        `[puppeteer] Ignoring executable path under /domains/: ${explicitPath}. Using ${normalizedExplicitPath} instead.`
+      );
+    }
+
+    if (fs.existsSync(normalizedExplicitPath)) {
+      return { executablePath: ensureExecutablePermission(normalizedExplicitPath), source: 'env' };
+    }
+
+    return {
+      executablePath: undefined,
+      source: 'env',
+      warning: `Configured browser path does not exist: ${normalizedExplicitPath}`,
+    };
+  }
+
+  try {
+    const bundledPath = puppeteer.executablePath();
+    if (bundledPath && fs.existsSync(bundledPath)) {
+      return { executablePath: ensureExecutablePermission(bundledPath), source: 'puppeteer' };
+    }
+  } catch {
+    // Continue without executablePath and let runtime report an actionable error.
+  }
+
+  // Self-heal for environments where build-time cache path and runtime path differ.
+  installChromeIfMissing();
+  try {
+    const installedPath = puppeteer.executablePath();
+    if (installedPath && fs.existsSync(installedPath)) {
+      return {
+        executablePath: ensureExecutablePermission(installedPath),
+        source: 'puppeteer-runtime-install',
+      };
+    }
+  } catch {
+    // keep falling back
+  }
+
+  return { executablePath: undefined, source: 'auto' };
+}
+
+function getRoom(userId) {
+  return `user:${userId}`;
+}
+
+function getSession(userId) {
+  if (!sessions.has(userId)) {
+    sessions.set(userId, {
+      client: null,
+      status: 'disconnected',
+      info: null,
+      qr: null,
+      initializing: false,
+    });
+  }
+
+  return sessions.get(userId);
+}
+
+function emitStatus(userId, extra = {}) {
+  if (!io) return;
+
+  const session = getSession(userId);
+  io.to(getRoom(userId)).emit('whatsapp:status', {
+    status: session.status,
+    info: session.info,
+    ...extra,
+  });
+}
+
+function emitQr(userId, qr) {
+  if (!io) return;
+  io.to(getRoom(userId)).emit('whatsapp:qr', qr);
+}
+
+function getConnectionStatus(userId) {
+  return getSession(userId).status;
+}
+
+function getClientInfo(userId) {
+  return getSession(userId).info;
+}
+
+function getQrCode(userId) {
+  return getSession(userId).qr;
+}
+
+function getClient(userId) {
+  return getSession(userId).client;
+}
+
+function initClient(socketIo, userId) {
   io = socketIo;
+  const session = getSession(userId);
 
-  client = new Client({
+  if (session.client || session.initializing) {
+    return session.client;
+  }
+
+  session.initializing = true;
+  session.status = 'initializing';
+  const { executablePath, source, warning } = resolveExecutablePath();
+  if (warning) {
+    console.warn(`WhatsApp browser path warning for user ${userId}: ${warning}`);
+  }
+
+  const client = new Client({
     authStrategy: new LocalAuth({
+      clientId: `user-${userId}`,
       dataPath: path.join(__dirname, '..', '..', '.wwebjs_auth'),
     }),
     puppeteer: {
       headless: true,
+      ...(executablePath ? { executablePath } : {}),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -34,64 +230,92 @@ function initClient(socketIo) {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--disable-gpu',
+        '--disable-features=site-per-process',
+        '--disable-features=IsolateOrigins',
       ],
     },
   });
 
+  session.client = client;
+
   client.on('qr', (qr) => {
-    connectionStatus = 'qr';
-    io.emit('whatsapp:qr', qr);
-    io.emit('whatsapp:status', { status: 'qr' });
+    session.status = 'qr';
+    session.qr = qr;
+    emitQr(userId, qr);
+    emitStatus(userId);
   });
 
   client.on('authenticated', () => {
-    connectionStatus = 'authenticated';
-    io.emit('whatsapp:status', { status: 'authenticated' });
+    session.status = 'authenticated';
+    emitStatus(userId);
   });
 
   client.on('auth_failure', (msg) => {
-    connectionStatus = 'auth_failure';
-    io.emit('whatsapp:status', { status: 'auth_failure', message: msg });
+    session.initializing = false;
+    session.status = 'auth_failure';
+    session.info = null;
+    session.qr = null;
+    session.client = null;
+    emitStatus(userId, { message: msg });
   });
 
   client.on('ready', () => {
-    connectionStatus = 'connected';
-    clientInfo = {
+    session.initializing = false;
+    session.status = 'connected';
+    session.qr = null;
+    session.info = {
       pushname: client.info.pushname,
       phone: client.info.wid.user,
       platform: client.info.platform,
     };
-    io.emit('whatsapp:status', { status: 'connected', info: clientInfo });
+    emitStatus(userId);
   });
 
   client.on('disconnected', (reason) => {
-    connectionStatus = 'disconnected';
-    clientInfo = null;
-    io.emit('whatsapp:status', { status: 'disconnected', reason });
+    session.initializing = false;
+    session.status = 'disconnected';
+    session.info = null;
+    session.qr = null;
+    session.client = null;
+    emitStatus(userId, { reason });
   });
 
   client.on('change_state', (state) => {
-    io.emit('whatsapp:status', {
-      status: connectionStatus,
-      state,
-      info: clientInfo,
-    });
+    emitStatus(userId, { state });
   });
 
   client.initialize().catch((err) => {
-    console.error('WhatsApp client init error:', err);
-    connectionStatus = 'error';
-    io.emit('whatsapp:status', {
-      status: 'error',
-      message: err.message,
+    console.error(`WhatsApp client init error for user ${userId}:`, err);
+    session.initializing = false;
+    session.client = null;
+    session.status = 'error';
+    session.info = null;
+    session.qr = null;
+    const troubleshootingHint = executablePath
+      ? undefined
+      : 'No valid Chromium executable was found. Set CHROMIUM_PATH or PUPPETEER_EXECUTABLE_PATH to a valid browser binary.';
+
+    emitStatus(userId, {
+      message: troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message,
+      executablePath: executablePath || null,
+      executablePathSource: source,
     });
   });
 
   return client;
 }
 
-async function sendMessage(phoneNumber, message, mediaPath) {
-  if (!client || connectionStatus !== 'connected') {
+async function ensureClient(userId) {
+  const session = getSession(userId);
+  if (!session.client && !session.initializing && io) {
+    initClient(io, userId);
+  }
+  return getSession(userId);
+}
+
+async function sendMessage(userId, phoneNumber, message, mediaPath) {
+  const session = await ensureClient(userId);
+  if (!session.client || session.status !== 'connected') {
     throw new Error('WhatsApp client not connected');
   }
 
@@ -99,13 +323,16 @@ async function sendMessage(phoneNumber, message, mediaPath) {
 
   if (mediaPath) {
     const media = MessageMedia.fromFilePath(mediaPath);
-    await client.sendMessage(chatId, media, { caption: message });
+    await session.client.sendMessage(chatId, media, { caption: message });
   } else {
-    await client.sendMessage(chatId, message);
+    await session.client.sendMessage(chatId, message);
   }
 }
 
-async function logout() {
+async function logout(userId) {
+  const session = getSession(userId);
+  const { client } = session;
+
   if (client) {
     try {
       await client.logout();
@@ -117,18 +344,27 @@ async function logout() {
     } catch (e) {
       // ignore
     }
-    client = null;
-    connectionStatus = 'disconnected';
-    clientInfo = null;
-    io.emit('whatsapp:status', { status: 'disconnected' });
+  }
+
+  session.client = null;
+  session.initializing = false;
+  session.status = 'disconnected';
+  session.info = null;
+  session.qr = null;
+  emitStatus(userId);
+
+  if (io) {
+    initClient(io, userId);
   }
 }
 
 module.exports = {
   initClient,
+  ensureClient,
   getClient,
   getConnectionStatus,
   getClientInfo,
+  getQrCode,
   sendMessage,
   logout,
 };

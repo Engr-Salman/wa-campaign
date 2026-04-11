@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { MessageCircle, LogIn, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { apiUrl } from '../lib/apiBase';
+import { apiUrl, readJsonResponse } from '../utils/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         if (data.needsVerification) {
           navigate('/verify', { state: { email: data.email } });
@@ -80,6 +80,11 @@ export default function Login() {
               placeholder="Enter your password"
               required
             />
+          </div>
+          <div className="text-right">
+            <Link to="/forgot-password" className="text-sm text-whatsapp hover:underline font-medium">
+              Forgot password?
+            </Link>
           </div>
           <button
             type="submit"

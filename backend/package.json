@@ -4,18 +4,20 @@
   "description": "Backend for WhatsApp Bulk Messaging Tool",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "postinstall": "node scripts/install-browser.js",
+    "start": "node --experimental-sqlite index.js",
+    "dev": "node --experimental-sqlite index.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.10.1",
     "papaparse": "^5.4.1",
+    "puppeteer": "^24.40.0",
     "socket.io": "^4.8.1",
     "whatsapp-web.js": "^1.26.0",
     "xlsx": "^0.18.5"

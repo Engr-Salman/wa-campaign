@@ -1,8 +1,8 @@
 import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Smartphone, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Smartphone, CheckCircle, XCircle, Loader2, AlertTriangle } from 'lucide-react';
 
-export default function QRCodeLogin({ qrCode, status, info }) {
+export default function QRCodeLogin({ qrCode, status, info, message }) {
   if (status === 'connected') {
     return (
       <div className="card text-center py-10">
@@ -22,6 +22,23 @@ export default function QRCodeLogin({ qrCode, status, info }) {
         <XCircle className="mx-auto text-red-500 mb-4" size={64} />
         <h2 className="text-2xl font-bold mb-2">Authentication Failed</h2>
         <p className="text-gray-500">Please refresh and try again.</p>
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="card text-center py-10">
+        <AlertTriangle className="mx-auto text-red-500 mb-4" size={64} />
+        <h2 className="text-2xl font-bold mb-2">WhatsApp Initialization Failed</h2>
+        <p className="text-gray-500 mb-3">
+          The hosting environment could not start the WhatsApp browser session.
+        </p>
+        {message && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-2xl mx-auto break-words">
+            {message}
+          </p>
+        )}
       </div>
     );
   }

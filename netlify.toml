@@ -1,39 +1,11 @@
-# Netlify configuration for the WhatsApp Bulk Messaging frontend.
-#
-# IMPORTANT: Only the React frontend is deployed to Netlify. The Node.js
-# backend (Express + whatsapp-web.js + SQLite) cannot run on Netlify because
-# it needs a long-running process, Puppeteer/Chromium, and a persistent
-# filesystem. Deploy the backend separately (Railway, Render, Fly.io, or a
-# VPS) and set the VITE_API_URL environment variable below to its public URL.
-
 [build]
-  # Run the frontend build from the repo root so the path is stable.
-  base    = "frontend"
-  command = "npm install && npm run build"
-  publish = "dist"
+  command = "npm run build"
+  publish = "frontend/dist"
 
 [build.environment]
-  # Pin Node to an LTS version that matches the one we use locally.
-  NODE_VERSION = "20"
-  # Skip Puppeteer's Chromium download in case any transitive dep pulls it in —
-  # the frontend never needs it and the download slows builds significantly.
-  PUPPETEER_SKIP_DOWNLOAD        = "true"
-  PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+  NODE_VERSION = "22"
 
-# SPA fallback: every unknown path should serve index.html so React Router
-# can handle client-side routing (/login, /campaign/:id, /admin/...).
 [[redirects]]
-  from   = "/*"
-  to     = "/index.html"
+  from = "/*"
+  to = "/index.html"
   status = 200
-
-# --- How to point the frontend at your backend ---------------------------------
-#
-# Set an environment variable in the Netlify UI (Site settings -> Environment
-# variables) named VITE_API_URL with the full URL of your deployed backend, e.g.
-#
-#     VITE_API_URL = https://wa-backend.up.railway.app
-#
-# Vite bakes this into the build, and all API + Socket.io calls will target it.
-# You also need to make sure the backend has CORS configured to allow your
-# Netlify domain (set FRONTEND_URL on the backend to https://<your-site>.netlify.app).

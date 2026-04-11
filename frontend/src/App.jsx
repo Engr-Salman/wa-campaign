@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import {
   LayoutDashboard, PlusCircle, History as HistoryIcon,
@@ -12,6 +12,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Verify from './pages/Verify';
+import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import NewCampaign from './pages/NewCampaign';
 import CampaignDetail from './pages/CampaignDetail';
@@ -21,6 +22,7 @@ import Credits from './pages/Credits';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminCredits from './pages/AdminCredits';
+import { readJsonResponse } from './utils/api';
 
 function AppRouter() {
   const { user, loading } = useAuth();
@@ -40,6 +42,7 @@ function AppRouter() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
       <Route path="/verify" element={<Verify />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
 
       {/* All other routes require auth — redirect to login if not authed */}
       <Route path="/*" element={user ? <AppLayout /> : <Navigate to="/login" replace />} />
@@ -52,6 +55,7 @@ function AppLayout() {
   const { user, logout, authFetch } = useAuth();
   const [waStatus, setWaStatus] = useState('disconnected');
   const [waInfo, setWaInfo] = useState(null);
+  const [waMessage, setWaMessage] = useState('');
   const [qrCode, setQrCode] = useState(null);
   const [theme, setTheme] = useState('light');
 
@@ -60,6 +64,7 @@ function AppLayout() {
     const unsub1 = on('whatsapp:status', (data) => {
       setWaStatus(data.status);
       if (data.info) setWaInfo(data.info);
+      setWaMessage(data.message || '');
       if (data.status === 'connected') setQrCode(null);
     });
     const unsub2 = on('whatsapp:qr', (qr) => setQrCode(qr));
@@ -72,10 +77,11 @@ function AppLayout() {
 
   useEffect(() => {
     authFetch('/api/whatsapp/status')
-      .then((r) => r.json())
+      .then((r) => readJsonResponse(r))
       .then((data) => {
         setWaStatus(data.status);
         if (data.info) setWaInfo(data.info);
+        setWaMessage(data.message || '');
       })
       .catch(() => {});
   }, []);
@@ -85,6 +91,7 @@ function AppLayout() {
       await authFetch('/api/whatsapp/logout', { method: 'POST' });
       setWaStatus('disconnected');
       setWaInfo(null);
+      setWaMessage('');
     } catch {}
   };
 
@@ -150,7 +157,7 @@ function AppLayout() {
         <main className="flex-1 p-6">
           <Routes>
             <Route path="/" element={<Dashboard waStatus={waStatus} />} />
-            <Route path="/campaign/new" element={<NewCampaign waStatus={waStatus} waInfo={waInfo} qrCode={qrCode} />} />
+            <Route path="/campaign/new" element={<NewCampaign waStatus={waStatus} waInfo={waInfo} waMessage={waMessage} qrCode={qrCode} />} />
             <Route path="/campaign/:id" element={<CampaignDetail socket={socket} />} />
             <Route path="/history" element={<History />} />
             <Route path="/credits" element={<Credits />} />
