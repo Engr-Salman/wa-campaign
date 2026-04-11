@@ -1,9 +1,25 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
+const puppeteer = require('puppeteer');
 
 let io = null;
 const sessions = new Map();
-const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH;
+
+function resolveExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  if (process.env.CHROMIUM_PATH) {
+    return process.env.CHROMIUM_PATH;
+  }
+
+  try {
+    return puppeteer.executablePath();
+  } catch {
+    return undefined;
+  }
+}
 
 function getRoom(userId) {
   return `user:${userId}`;
@@ -65,6 +81,7 @@ function initClient(socketIo, userId) {
 
   session.initializing = true;
   session.status = 'initializing';
+  const executablePath = resolveExecutablePath();
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -81,6 +98,8 @@ function initClient(socketIo, userId) {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--disable-gpu',
+        '--disable-features=site-per-process',
+        '--disable-features=IsolateOrigins',
       ],
     },
   });
@@ -140,7 +159,10 @@ function initClient(socketIo, userId) {
     session.status = 'error';
     session.info = null;
     session.qr = null;
-    emitStatus(userId, { message: err.message });
+    emitStatus(userId, {
+      message: err.message,
+      executablePath: executablePath || null,
+    });
   });
 
   return client;

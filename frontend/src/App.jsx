@@ -55,6 +55,7 @@ function AppLayout() {
   const { user, logout, authFetch } = useAuth();
   const [waStatus, setWaStatus] = useState('disconnected');
   const [waInfo, setWaInfo] = useState(null);
+  const [waMessage, setWaMessage] = useState('');
   const [qrCode, setQrCode] = useState(null);
   const [theme, setTheme] = useState('light');
 
@@ -63,6 +64,7 @@ function AppLayout() {
     const unsub1 = on('whatsapp:status', (data) => {
       setWaStatus(data.status);
       if (data.info) setWaInfo(data.info);
+      setWaMessage(data.message || '');
       if (data.status === 'connected') setQrCode(null);
     });
     const unsub2 = on('whatsapp:qr', (qr) => setQrCode(qr));
@@ -79,6 +81,7 @@ function AppLayout() {
       .then((data) => {
         setWaStatus(data.status);
         if (data.info) setWaInfo(data.info);
+        setWaMessage(data.message || '');
       })
       .catch(() => {});
   }, []);
@@ -88,6 +91,7 @@ function AppLayout() {
       await authFetch('/api/whatsapp/logout', { method: 'POST' });
       setWaStatus('disconnected');
       setWaInfo(null);
+      setWaMessage('');
     } catch {}
   };
 
@@ -153,7 +157,7 @@ function AppLayout() {
         <main className="flex-1 p-6">
           <Routes>
             <Route path="/" element={<Dashboard waStatus={waStatus} />} />
-            <Route path="/campaign/new" element={<NewCampaign waStatus={waStatus} waInfo={waInfo} qrCode={qrCode} />} />
+            <Route path="/campaign/new" element={<NewCampaign waStatus={waStatus} waInfo={waInfo} waMessage={waMessage} qrCode={qrCode} />} />
             <Route path="/campaign/:id" element={<CampaignDetail socket={socket} />} />
             <Route path="/history" element={<History />} />
             <Route path="/credits" element={<Credits />} />
