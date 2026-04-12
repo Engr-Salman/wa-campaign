@@ -7,7 +7,7 @@ import ContactTable from '../components/ContactTable';
 import LogFeed from '../components/LogFeed';
 import RateLimitWarning from '../components/RateLimitWarning';
 import { useCampaign } from '../hooks/useCampaign';
-import { apiUrl } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 export default function CampaignDetail({ socket }) {
   const { id } = useParams();
@@ -19,6 +19,7 @@ export default function CampaignDetail({ socket }) {
     stopCampaign,
     retryCampaign,
   } = useCampaign();
+  const { authFetch } = useAuth();
 
   const [campaign, setCampaign] = useState(null);
   const [contacts, setContacts] = useState([]);
@@ -89,11 +90,19 @@ export default function CampaignDetail({ socket }) {
       }
     };
 
+    const handleError = (data) => {
+      if (String(data.campaignId) === String(id)) {
+        toast.error(data.error || 'Campaign encountered an error');
+        loadCampaign();
+      }
+    };
+
     socket.on('campaign:progress', handleProgress);
     socket.on('campaign:status', handleStatus);
     socket.on('campaign:message_sent', handleSent);
     socket.on('campaign:message_failed', handleFailed);
     socket.on('campaign:rate_limit', handleRateLimit);
+    socket.on('campaign:error', handleError);
 
     return () => {
       socket.off('campaign:progress', handleProgress);
@@ -101,6 +110,7 @@ export default function CampaignDetail({ socket }) {
       socket.off('campaign:message_sent', handleSent);
       socket.off('campaign:message_failed', handleFailed);
       socket.off('campaign:rate_limit', handleRateLimit);
+      socket.off('campaign:error', handleError);
     };
   }, [socket, id]);
 
@@ -112,6 +122,24 @@ export default function CampaignDetail({ socket }) {
     campaign.sent_count > 0 && campaign.total_contacts > 0
       ? Math.round((campaign.sent_count / campaign.total_contacts) * 100)
       : 0;
+
+  const downloadResults = async () => {
+    try {
+      const res = await authFetch(`/api/campaigns/${id}/export`);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `${campaign.name || `campaign-${id}`}_results.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -126,10 +154,10 @@ export default function CampaignDetail({ socket }) {
         campaign={campaign}
         progress={progress}
         onStart={() => startCampaign(id).then(loadCampaign)}
-        onPause={() => pauseCampaign(id)}
-        onResume={() => resumeCampaign(id)}
-        onStop={() => stopCampaign(id)}
-        onRetry={() => retryCampaign(id)}
+        onPause={() => pauseCampaign(id).then(loadCampaign)}
+        onResume={() => resumeCampaign(id).then(loadCampaign)}
+        onStop={() => stopCampaign(id).then(loadCampaign)}
+        onRetry={() => retryCampaign(id).then(loadCampaign)}
       />
 
       <RateLimitWarning rateLimit={rateLimit} />
@@ -139,12 +167,12 @@ export default function CampaignDetail({ socket }) {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold">Campaign Summary</h3>
-            <a
-              href={apiUrl(`/api/campaigns/${id}/export`)}
+            <button
+              onClick={downloadResults}
               className="btn-secondary flex items-center gap-2 text-sm"
             >
               <Download size={16} /> Export Results CSV
-            </a>
+            </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div>

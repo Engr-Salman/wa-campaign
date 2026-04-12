@@ -25,6 +25,7 @@ export default function NewCampaign({ waStatus, waInfo, waMessage, qrCode }) {
   const [campaignName, setCampaignName] = useState('');
   const [contacts, setContacts] = useState([]);
   const [parseResult, setParseResult] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [message, setMessage] = useState('');
   const [mediaFile, setMediaFile] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -42,6 +43,7 @@ export default function NewCampaign({ waStatus, waInfo, waMessage, qrCode }) {
       const result = await uploadContacts(acceptedFiles[0]);
       setContacts(result.contacts);
       setParseResult(result);
+      setSourceFile(result.sourceFile || null);
       toast.success(
         `Loaded ${result.validCount} valid contacts (${result.invalidCount} invalid, ${result.duplicateCount} duplicates)`
       );
@@ -84,6 +86,8 @@ export default function NewCampaign({ waStatus, waInfo, waMessage, qrCode }) {
         name: campaignName,
         message,
         media_path: mediaFile?.path || null,
+        source_file_path: sourceFile?.path || null,
+        source_file_name: sourceFile?.originalName || sourceFile?.filename || null,
         contacts: validContacts,
       });
       toast.success('Campaign created!');

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Clock, Eye, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaign } from '../hooks/useCampaign';
-import { apiUrl } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 const statusBadge = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -12,6 +12,7 @@ const statusBadge = {
 
 export default function AdminCredits() {
   const { getAdminCreditRequests, processCreditRequest } = useCampaign();
+  const { authFetch } = useAuth();
   const [requests, setRequests] = useState([]);
   const [filter, setFilter] = useState('');
   const [processing, setProcessing] = useState(null);
@@ -34,6 +35,35 @@ export default function AdminCredits() {
       setProcessing(null);
     }
   };
+
+  const openReceipt = async (request) => {
+    try {
+      const res = await authFetch(`/api/admin/credit-requests/${request.id}/receipt`);
+      if (!res.ok) {
+        throw new Error('Failed to load receipt');
+      }
+
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      setViewReceipt((current) => {
+        if (current?.url?.startsWith('blob:')) {
+          URL.revokeObjectURL(current.url);
+        }
+        return {
+          url: objectUrl,
+          isPdf: blob.type === 'application/pdf' || String(request.receipt_path || '').toLowerCase().endsWith('.pdf'),
+        };
+      });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  useEffect(() => () => {
+    if (viewReceipt?.url?.startsWith('blob:')) {
+      URL.revokeObjectURL(viewReceipt.url);
+    }
+  }, [viewReceipt]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -89,10 +119,7 @@ export default function AdminCredits() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      const filename = r.receipt_path.split('/').pop().split('\\').pop();
-                      setViewReceipt(apiUrl(`/api/admin/receipts/${filename}`));
-                    }}
+                    onClick={() => openReceipt(r)}
                     className="btn-secondary text-sm py-1 flex items-center gap-1"
                   >
                     <Eye size={14} /> Receipt
@@ -140,9 +167,18 @@ export default function AdminCredits() {
 
       {/* Receipt Viewer Modal */}
       {viewReceipt && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setViewReceipt(null)}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => {
+          if (viewReceipt?.url?.startsWith('blob:')) {
+            URL.revokeObjectURL(viewReceipt.url);
+          }
+          setViewReceipt(null);
+        }}>
           <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl max-h-[90vh] overflow-auto p-2" onClick={(e) => e.stopPropagation()}>
-            <img src={viewReceipt} alt="Payment Receipt" className="w-full rounded-lg" />
+            {viewReceipt.isPdf ? (
+              <iframe src={viewReceipt.url} title="Payment Receipt" className="w-[80vw] max-w-4xl h-[75vh] rounded-lg" />
+            ) : (
+              <img src={viewReceipt.url} alt="Payment Receipt" className="w-full rounded-lg" />
+            )}
             <button onClick={() => setViewReceipt(null)} className="btn-secondary w-full mt-2">Close</button>
           </div>
         </div>

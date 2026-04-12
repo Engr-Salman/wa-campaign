@@ -392,7 +392,7 @@ function initClient(socketIo, userId) {
 async function ensureClient(userId) {
   const session = getSession(userId);
   if (!session.client && !session.initializing && io) {
-    initClient(io, userId);
+    await initClient(io, userId);
   }
   return getSession(userId);
 }
@@ -419,7 +419,10 @@ async function logout(userId) {
 
   if (client) {
     try {
-      await client.logout();
+      await Promise.race([
+        client.logout(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp logout timed out')), 15000)),
+      ]);
     } catch (e) {
       // ignore
     }
@@ -432,6 +435,7 @@ async function logout(userId) {
 
   session.client = null;
   session.initializing = false;
+  session.initPromise = null;
   session.status = 'disconnected';
   session.info = null;
   session.qr = null;

@@ -18,7 +18,7 @@ const contactsStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
-    cb(null, `contacts_${Date.now()}${ext}`);
+    cb(null, `contacts_${req.user.id}_${Date.now()}${ext}`);
   },
 });
 
@@ -39,7 +39,7 @@ const mediaStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
-    cb(null, `media_${Date.now()}${ext}`);
+    cb(null, `media_${req.user.id}_${Date.now()}${ext}`);
   },
 });
 
@@ -77,10 +77,14 @@ router.post('/upload', contactsUpload.single('file'), (req, res) => {
       result = parseExcel(req.file.path);
     }
 
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-
-    res.json(result);
+    res.json({
+      ...result,
+      sourceFile: {
+        path: req.file.path,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+      },
+    });
   } catch (err) {
     // Clean up on error
     if (req.file && fs.existsSync(req.file.path)) {

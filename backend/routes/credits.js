@@ -68,11 +68,12 @@ router.post('/request', authMiddleware, receiptUpload.single('receipt'), (req, r
 
   try {
     const requestId = db.createCreditRequest(req.user.id, creditAmount, req.file.path);
+    const rate = parseInt(db.getSetting('credit_rate_pkr')) || 5;
     res.json({
       message: 'Credit request submitted. Admin will review your payment receipt.',
       requestId,
       amount: creditAmount,
-      pkr_amount: creditAmount / 5,
+      pkr_amount: creditAmount / rate,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -1,5 +1,4 @@
 const express = require('express');
-const path = require('path');
 const router = express.Router();
 const db = require('../db/database');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
@@ -36,7 +35,10 @@ router.get('/users/:id', (req, res) => {
   const user = db.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const campaigns = db.getUserCampaigns(req.params.id);
+  const campaigns = db.getUserCampaigns(req.params.id).map((campaign) => ({
+    ...campaign,
+    source_file_download_url: campaign.source_file_path ? `/api/campaigns/${campaign.id}/source-file` : null,
+  }));
   const creditRequests = db.getUserCreditRequests(req.params.id);
   const transactions = db.getCreditTransactions(req.params.id, 100);
 
@@ -96,10 +98,14 @@ router.post('/credit-requests/:id/process', (req, res) => {
   res.json({ message: `Request ${status}`, request: result });
 });
 
-// Serve receipt images
-router.get('/receipts/:filename', (req, res) => {
-  const filePath = path.join(__dirname, '..', '..', 'uploads', 'receipts', req.params.filename);
-  res.sendFile(filePath);
+// Serve receipt images/files
+router.get('/credit-requests/:id/receipt', (req, res) => {
+  const request = db.getCreditRequestById(req.params.id);
+  if (!request || !request.receipt_path) {
+    return res.status(404).json({ error: 'Receipt not found' });
+  }
+
+  res.sendFile(request.receipt_path);
 });
 
 // Get all campaigns (admin view)

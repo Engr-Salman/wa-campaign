@@ -23,6 +23,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminCredits from './pages/AdminCredits';
 import { readJsonResponse } from './utils/api';
+import toast from 'react-hot-toast';
 
 function AppRouter() {
   const { user, loading } = useAuth();
@@ -88,11 +89,19 @@ function AppLayout() {
 
   const handleLogout = async () => {
     try {
-      await authFetch('/api/whatsapp/logout', { method: 'POST' });
+      const res = await authFetch('/api/whatsapp/logout', { method: 'POST' });
+      const data = await readJsonResponse(res);
+      if (!res.ok) {
+        throw new Error(data.error || 'WhatsApp logout failed');
+      }
       setWaStatus('disconnected');
       setWaInfo(null);
       setWaMessage('');
-    } catch {}
+      setQrCode(null);
+      toast.success('WhatsApp logged out');
+    } catch (error) {
+      toast.error(error.message || 'WhatsApp logout failed');
+    }
   };
 
   const navLink = (to, icon, label) => (
@@ -161,7 +170,7 @@ function AppLayout() {
             <Route path="/campaign/:id" element={<CampaignDetail socket={socket} />} />
             <Route path="/history" element={<History />} />
             <Route path="/credits" element={<Credits />} />
-            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} />} />
+            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} onWhatsappLogout={handleLogout} />} />
             {user?.is_admin && (
               <>
                 <Route path="/admin" element={<AdminDashboard />} />

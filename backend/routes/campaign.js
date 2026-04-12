@@ -4,6 +4,7 @@ const db = require('../db/database');
 const sender = require('../whatsapp/sender');
 const { authMiddleware } = require('../middleware/auth');
 const Papa = require('papaparse');
+const path = require('path');
 
 // All campaign routes require auth
 router.use(authMiddleware);
@@ -34,7 +35,7 @@ router.get('/:id', (req, res) => {
 
 // Create campaign (check credits)
 router.post('/', (req, res) => {
-  const { name, message, media_path, contacts } = req.body;
+  const { name, message, media_path, contacts, source_file_path, source_file_name } = req.body;
 
   if (!name || !message || !contacts || !contacts.length) {
     return res.status(400).json({ error: 'Name, message, and contacts are required' });
@@ -53,7 +54,15 @@ router.post('/', (req, res) => {
   }
 
   try {
-    const campaignId = db.createCampaign(req.user.id, name, message, media_path, contacts.length);
+    const campaignId = db.createCampaign(
+      req.user.id,
+      name,
+      message,
+      media_path,
+      contacts.length,
+      source_file_path || null,
+      source_file_name || null
+    );
     db.insertContacts(campaignId, contacts);
     const campaign = db.getCampaign(campaignId);
     res.json(campaign);
@@ -174,6 +183,18 @@ router.get('/:id/export', (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${campaign.name}_results.csv"`);
   res.send(csv);
+});
+
+router.get('/:id/source-file', (req, res) => {
+  const campaign = getOwnedCampaign(req, res);
+  if (!campaign) return;
+
+  const file = db.getCampaignSourceFile(req.params.id);
+  if (!file || !file.source_file_path) {
+    return res.status(404).json({ error: 'Source file not found' });
+  }
+
+  res.download(file.source_file_path, file.source_file_name || path.basename(file.source_file_path));
 });
 
 // Get campaign logs

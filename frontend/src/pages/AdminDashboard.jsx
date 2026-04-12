@@ -7,13 +7,15 @@ import {
 import { useCampaign } from '../hooks/useCampaign';
 
 export default function AdminDashboard() {
-  const { getAdminDashboard, getAdminCreditRequests } = useCampaign();
+  const { getAdminDashboard, getAdminCreditRequests, getSettings } = useCampaign();
   const [stats, setStats] = useState(null);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [creditRate, setCreditRate] = useState(null);
 
   useEffect(() => {
     getAdminDashboard().then(setStats).catch(() => {});
     getAdminCreditRequests('pending').then(setPendingRequests).catch(() => {});
+    getSettings().then((settings) => setCreditRate(settings.credit_rate_pkr || null)).catch(() => {});
   }, []);
 
   if (!stats) return <div className="text-center py-10 text-gray-400">Loading...</div>;
@@ -96,6 +98,18 @@ export default function AdminDashboard() {
           <CreditCard className="mx-auto text-purple-500 mb-2" size={32} />
           <p className="font-bold">Credit Requests</p>
           <p className="text-sm text-gray-500">{stats.pendingRequests} pending</p>
+        </Link>
+      </div>
+
+      <div className="card flex items-center justify-between">
+        <div>
+          <p className="font-bold">Credit Price</p>
+          <p className="text-sm text-gray-500">
+            {creditRate ? `${creditRate} credits per PKR` : 'Set from admin settings'}
+          </p>
+        </div>
+        <Link to="/settings" className="btn-secondary text-sm py-1">
+          Update Price
         </Link>
       </div>
     </div>

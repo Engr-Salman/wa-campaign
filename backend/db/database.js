@@ -72,6 +72,8 @@ function initSchema() {
       name TEXT NOT NULL,
       message TEXT NOT NULL,
       media_path TEXT,
+      source_file_path TEXT,
+      source_file_name TEXT,
       status TEXT NOT NULL DEFAULT 'draft',
       total_contacts INTEGER DEFAULT 0,
       sent_count INTEGER DEFAULT 0,
@@ -122,6 +124,8 @@ function initSchema() {
     try { db.exec("ALTER TABLE campaigns ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0"); } catch {}
     try { db.exec("ALTER TABLE campaigns ADD COLUMN credits_used INTEGER DEFAULT 0"); } catch {}
   }
+  try { db.prepare("SELECT source_file_path FROM campaigns LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE campaigns ADD COLUMN source_file_path TEXT"); } catch {} }
+  try { db.prepare("SELECT source_file_name FROM campaigns LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE campaigns ADD COLUMN source_file_name TEXT"); } catch {} }
   try { db.prepare("SELECT password_reset_code FROM users LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE users ADD COLUMN password_reset_code TEXT"); } catch {} }
   try { db.prepare("SELECT password_reset_expires FROM users LIMIT 1").get(); } catch { try { db.exec("ALTER TABLE users ADD COLUMN password_reset_expires TEXT"); } catch {} }
 
@@ -182,10 +186,15 @@ function getAllSettings() {
 function createUser(email, passwordHash, name) {
   const code = crypto.randomInt(100000, 999999).toString();
   const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const starterCredits = 250;
   const result = getDb().prepare(
-    'INSERT INTO users (email, password_hash, name, verification_code, verification_expires) VALUES (?, ?, ?, ?, ?)'
-  ).run(email, passwordHash, name, code, expires);
-  return { id: Number(result.lastInsertRowid), verification_code: code };
+    'INSERT INTO users (email, password_hash, name, verification_code, verification_expires, credits) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(email, passwordHash, name, code, expires, starterCredits);
+  const userId = Number(result.lastInsertRowid);
+  getDb().prepare(
+    'INSERT INTO credit_transactions (user_id, type, amount, balance_after, description, reference_id) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(userId, 'credit', starterCredits, starterCredits, 'Starter credits for new account', null);
+  return { id: userId, verification_code: code };
 }
 
 function getUserByEmail(email) {
@@ -296,7 +305,8 @@ function getCreditTransactions(userId, limit = 50) {
 
 // ==================== Credit Requests ====================
 function createCreditRequest(userId, amount, receiptPath) {
-  const pkrAmount = amount / 5;
+  const rate = parseInt(getSetting('credit_rate_pkr')) || 5;
+  const pkrAmount = amount / rate;
   const result = getDb().prepare(
     'INSERT INTO credit_requests (user_id, amount, pkr_amount, receipt_path) VALUES (?, ?, ?, ?)'
   ).run(userId, amount, pkrAmount, receiptPath);
@@ -313,6 +323,15 @@ function getCreditRequests(status) {
   }
   query += ' ORDER BY cr.created_at DESC';
   return getDb().prepare(query).all();
+}
+
+function getCreditRequestById(requestId) {
+  return getDb().prepare(
+    `SELECT cr.*, u.email, u.name as user_name, u.credits as user_credits
+     FROM credit_requests cr
+     JOIN users u ON cr.user_id = u.id
+     WHERE cr.id = ?`
+  ).get(requestId);
 }
 
 function getUserCreditRequests(userId) {
@@ -337,10 +356,10 @@ function processCreditRequest(requestId, status, adminNote, adminId) {
 }
 
 // ==================== Campaigns (user-scoped) ====================
-function createCampaign(userId, name, message, mediaPath, totalContacts) {
+function createCampaign(userId, name, message, mediaPath, totalContacts, sourceFilePath = null, sourceFileName = null) {
   const result = getDb().prepare(
-    'INSERT INTO campaigns (user_id, name, message, media_path, total_contacts) VALUES (?, ?, ?, ?, ?)'
-  ).run(userId, name, message, mediaPath || null, totalContacts);
+    'INSERT INTO campaigns (user_id, name, message, media_path, source_file_path, source_file_name, total_contacts) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(userId, name, message, mediaPath || null, sourceFilePath, sourceFileName, totalContacts);
   return Number(result.lastInsertRowid);
 }
 
@@ -365,6 +384,10 @@ function getAllCampaigns() {
      FROM campaigns c LEFT JOIN users u ON c.user_id = u.id
      ORDER BY c.created_at DESC`
   ).all();
+}
+
+function getCampaignSourceFile(campaignId) {
+  return getDb().prepare('SELECT id, user_id, source_file_path, source_file_name FROM campaigns WHERE id = ?').get(campaignId);
 }
 
 function updateCampaignStatus(id, status) {
@@ -558,8 +581,9 @@ module.exports = {
   getSetting, setSetting, getAllSettings,
   createUser, getUserByEmail, getUserById, verifyUser, resendVerification, createPasswordReset, resetPassword, updateLastLogin, getAllUsers, getUserCount,
   getUserCredits, addCredits, deductCredits, getCreditTransactions,
-  createCreditRequest, getCreditRequests, getUserCreditRequests, processCreditRequest,
+  createCreditRequest, getCreditRequests, getCreditRequestById, getUserCreditRequests, processCreditRequest,
   createCampaign, getCampaign, getCampaignForUser, getUserCampaigns, getAllCampaigns,
+  getCampaignSourceFile,
   updateCampaignStatus, updateCampaignCounts, incrementCampaignCreditsUsed, recoverInterruptedCampaigns,
   insertContacts, getContactsByCampaign, getPendingContacts, getFailedContacts,
   updateContactStatus, incrementContactRetry, deleteContactFromCampaign,

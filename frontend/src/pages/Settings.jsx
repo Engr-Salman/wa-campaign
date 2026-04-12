@@ -11,9 +11,9 @@ const SAFE_LIMITS = {
   messages_per_day: 300,
 };
 
-export default function Settings({ theme, setTheme }) {
+export default function Settings({ theme, setTheme, onWhatsappLogout }) {
   const { getSettings, updateSettings } = useCampaign();
-  const { authFetch } = useAuth();
+  const { authFetch, user } = useAuth();
   const [settings, setSettings] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -45,6 +45,11 @@ export default function Settings({ theme, setTheme }) {
   };
 
   const handleLogout = async () => {
+    if (onWhatsappLogout) {
+      await onWhatsappLogout();
+      return;
+    }
+
     try {
       const res = await authFetch('/api/whatsapp/logout', {
         method: 'POST',
@@ -124,7 +129,7 @@ export default function Settings({ theme, setTheme }) {
             }}
             className={`px-4 py-2 rounded-lg border-2 transition-colors ${
               (settings.theme || theme) === 'light'
-                ? 'border-whatsapp bg-green-50'
+                ? 'border-whatsapp bg-white text-black dark:bg-white dark:text-black'
                 : 'border-gray-200'
             }`}
           >
@@ -137,7 +142,7 @@ export default function Settings({ theme, setTheme }) {
             }}
             className={`px-4 py-2 rounded-lg border-2 transition-colors ${
               (settings.theme || theme) === 'dark'
-                ? 'border-whatsapp bg-green-50'
+                ? 'border-whatsapp bg-white text-black dark:bg-white dark:text-black'
                 : 'border-gray-200'
             }`}
           >
@@ -145,6 +150,15 @@ export default function Settings({ theme, setTheme }) {
           </button>
         </div>
       </div>
+
+      {user?.is_admin && (
+        <div className="card space-y-4">
+          <h2 className="font-bold text-lg">Credits Pricing</h2>
+          <div className="grid grid-cols-2 gap-4">
+            {inputRow('Credits per PKR', 'credit_rate_pkr', 'number', 'Example: 5 means 5 credits cost 1 PKR')}
+          </div>
+        </div>
+      )}
 
       <div className="card space-y-4">
         <h2 className="font-bold text-lg">Other</h2>

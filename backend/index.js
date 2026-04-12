@@ -137,6 +137,12 @@ app.get('/api/whatsapp/status', authMiddleware, (req, res) => {
 // WhatsApp logout (protected)
 app.post('/api/whatsapp/logout', authMiddleware, async (req, res) => {
   try {
+    const activeRuns = sender.getActiveCampaign();
+    for (const run of activeRuns) {
+      if (String(run.userId) === String(req.user.id)) {
+        sender.stopCampaign(run.campaignId, req.user.id, req.user.is_admin);
+      }
+    }
     await waClient.logout(req.user.id);
     res.json({ status: 'logged_out' });
   } catch (err) {

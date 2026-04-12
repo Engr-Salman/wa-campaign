@@ -5,6 +5,7 @@ const db = require('../db/database');
 const activeRunsByCampaign = new Map();
 const activeCampaignByUser = new Map();
 let io = null;
+const MESSAGE_SEND_TIMEOUT_MS = 90000;
 
 function setIo(socketIo) {
   io = socketIo;
@@ -69,7 +70,207 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function startCampaign(campaignId, userId) {
+async function sendMessageWithTimeout(userId, phoneNumber, message, mediaPath) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      waClient.sendMessage(userId, phoneNumber, message, mediaPath),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Message send timed out')), MESSAGE_SEND_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function runCampaign(run, campaign) {
+  const { campaignId, userId } = run;
+  const contacts = db.getPendingContacts(campaignId);
+  const startTime = Date.now();
+  let sentInSession = 0;
+  let finalStatus = 'completed';
+
+  try {
+    for (let i = 0; i < contacts.length; i++) {
+      if (run.isStopped) {
+        finalStatus = 'stopped';
+        break;
+      }
+
+      while (run.isPaused) {
+        await sleep(1000);
+        if (run.isStopped) break;
+      }
+
+      if (run.isStopped) {
+        finalStatus = 'stopped';
+        break;
+      }
+
+      const contact = contacts[i];
+      if (contact.status === 'invalid' || contact.status === 'skipped') {
+        continue;
+      }
+
+      const userCredits = db.getUserCredits(userId);
+      if (userCredits < 1) {
+        run.isPaused = true;
+        run.status = 'paused';
+        finalStatus = 'paused';
+        emitToCampaignUser(userId, 'campaign:rate_limit', {
+          campaignId,
+          reason: 'no_credits',
+          delay: 0,
+          resumeAt: null,
+        });
+        break;
+      }
+
+      const rateCheck = run.rateLimiter.getDelay();
+      if (rateCheck.delay === -1) {
+        run.isPaused = true;
+        run.status = 'paused';
+        finalStatus = 'paused';
+        emitToCampaignUser(userId, 'campaign:rate_limit', {
+          campaignId,
+          reason: rateCheck.reason,
+          resumeAt: null,
+        });
+        break;
+      }
+
+      if (rateCheck.delay > 0) {
+        emitToCampaignUser(userId, 'campaign:rate_limit', {
+          campaignId,
+          reason: rateCheck.reason,
+          delay: rateCheck.delay,
+          resumeAt: rateCheck.resumeAt,
+        });
+        await sleep(rateCheck.delay);
+      }
+
+      const message = personalizeMessage(campaign.message, contact);
+
+      try {
+        await sendMessageWithTimeout(userId, contact.phone_number, message, campaign.media_path);
+
+        db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
+        db.incrementCampaignCreditsUsed(campaignId);
+        db.updateContactStatus(contact.id, 'sent', null);
+        db.incrementDailyStats();
+        run.rateLimiter.recordSend();
+        sentInSession++;
+
+        db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
+        emitToCampaignUser(userId, 'campaign:message_sent', {
+          campaignId,
+          contactId: contact.id,
+          phone: contact.phone_number,
+          status: 'sent',
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        const maxRetries = run.rateLimiter.getSettings().maxRetries;
+
+        if (contact.retry_count < maxRetries) {
+          db.incrementContactRetry(contact.id);
+          const retryDelay = Math.pow(2, contact.retry_count) * 30000;
+          emitToCampaignUser(userId, 'campaign:message_retry', {
+            campaignId,
+            contactId: contact.id,
+            phone: contact.phone_number,
+            retryIn: retryDelay,
+            attempt: contact.retry_count + 1,
+          });
+          await sleep(retryDelay);
+
+          try {
+            await sendMessageWithTimeout(userId, contact.phone_number, message, campaign.media_path);
+
+            db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
+            db.incrementCampaignCreditsUsed(campaignId);
+            db.updateContactStatus(contact.id, 'sent', null);
+            db.incrementDailyStats();
+            run.rateLimiter.recordSend();
+            sentInSession++;
+
+            db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
+            emitToCampaignUser(userId, 'campaign:message_sent', {
+              campaignId,
+              contactId: contact.id,
+              phone: contact.phone_number,
+              status: 'sent',
+              timestamp: new Date().toISOString(),
+            });
+          } catch (retryErr) {
+            db.updateContactStatus(contact.id, 'failed', retryErr.message);
+            db.addLog(campaignId, contact.id, contact.phone_number, 'failed', retryErr.message);
+            emitToCampaignUser(userId, 'campaign:message_failed', {
+              campaignId,
+              contactId: contact.id,
+              phone: contact.phone_number,
+              status: 'failed',
+              error: retryErr.message,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } else {
+          db.updateContactStatus(contact.id, 'failed', err.message);
+          db.addLog(campaignId, contact.id, contact.phone_number, 'failed', err.message);
+          emitToCampaignUser(userId, 'campaign:message_failed', {
+            campaignId,
+            contactId: contact.id,
+            phone: contact.phone_number,
+            status: 'failed',
+            error: err.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      db.updateCampaignCounts(campaignId);
+      const updatedCampaign = db.getCampaign(campaignId);
+      const elapsed = Date.now() - startTime;
+      const rate = sentInSession / Math.max(elapsed / 1000, 1);
+      const remaining =
+        updatedCampaign.total_contacts -
+        updatedCampaign.sent_count -
+        updatedCampaign.failed_count -
+        updatedCampaign.skipped_count;
+      const eta = rate > 0 ? remaining / rate : 0;
+
+      emitToCampaignUser(userId, 'campaign:progress', {
+        campaignId,
+        sent: updatedCampaign.sent_count,
+        failed: updatedCampaign.failed_count,
+        skipped: updatedCampaign.skipped_count,
+        total: updatedCampaign.total_contacts,
+        eta: Math.round(eta),
+        rate: Math.round(rate * 100) / 100,
+      });
+    }
+  } catch (error) {
+    finalStatus = 'paused';
+    run.isPaused = true;
+    run.status = 'paused';
+    db.addLog(campaignId, null, '', 'failed', error.message);
+    emitToCampaignUser(userId, 'campaign:error', {
+      campaignId,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
+    db.updateCampaignCounts(campaignId);
+    db.updateCampaignStatus(campaignId, finalStatus);
+    emitToCampaignUser(userId, 'campaign:status', { campaignId, status: finalStatus });
+    if (finalStatus !== 'paused') {
+      clearRun(campaignId);
+    }
+  }
+}
+
+function startCampaign(campaignId, userId) {
   const campaign = db.getCampaign(campaignId);
   if (!campaign) throw new Error('Campaign not found');
 
@@ -96,177 +297,10 @@ async function startCampaign(campaignId, userId) {
   db.updateCampaignStatus(campaignId, 'running');
   emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'running' });
 
-  const contacts = db.getPendingContacts(campaignId);
-  const startTime = Date.now();
-  let sentInSession = 0;
-
-  for (let i = 0; i < contacts.length; i++) {
-    if (run.isStopped) {
-      db.updateCampaignStatus(campaignId, 'stopped');
-      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'stopped' });
-      clearRun(campaignId);
-      return;
-    }
-
-    while (run.isPaused) {
-      await sleep(1000);
-      if (run.isStopped) break;
-    }
-
-    if (run.isStopped) {
-      db.updateCampaignStatus(campaignId, 'stopped');
-      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'stopped' });
-      clearRun(campaignId);
-      return;
-    }
-
-    const contact = contacts[i];
-    if (contact.status === 'invalid' || contact.status === 'skipped') {
-      continue;
-    }
-
-    const userCredits = db.getUserCredits(userId);
-    if (userCredits < 1) {
-      run.isPaused = true;
-      run.status = 'paused';
-      emitToCampaignUser(userId, 'campaign:rate_limit', {
-        campaignId,
-        reason: 'no_credits',
-        delay: 0,
-        resumeAt: null,
-      });
-      db.updateCampaignStatus(campaignId, 'paused');
-      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'paused' });
-      return;
-    }
-
-    const rateCheck = run.rateLimiter.getDelay();
-    if (rateCheck.delay === -1) {
-      run.isPaused = true;
-      run.status = 'paused';
-      emitToCampaignUser(userId, 'campaign:rate_limit', {
-        campaignId,
-        reason: rateCheck.reason,
-        resumeAt: null,
-      });
-      db.updateCampaignStatus(campaignId, 'paused');
-      emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'paused' });
-      return;
-    }
-
-    if (rateCheck.delay > 0) {
-      emitToCampaignUser(userId, 'campaign:rate_limit', {
-        campaignId,
-        reason: rateCheck.reason,
-        delay: rateCheck.delay,
-        resumeAt: rateCheck.resumeAt,
-      });
-      await sleep(rateCheck.delay);
-    }
-
-    const message = personalizeMessage(campaign.message, contact);
-
-    try {
-      await waClient.sendMessage(userId, contact.phone_number, message, campaign.media_path);
-
-      db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
-      db.incrementCampaignCreditsUsed(campaignId);
-      db.updateContactStatus(contact.id, 'sent', null);
-      run.rateLimiter.recordSend();
-      sentInSession++;
-
-      db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
-      emitToCampaignUser(userId, 'campaign:message_sent', {
-        campaignId,
-        contactId: contact.id,
-        phone: contact.phone_number,
-        status: 'sent',
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err) {
-      const maxRetries = run.rateLimiter.getSettings().maxRetries;
-
-      if (contact.retry_count < maxRetries) {
-        db.incrementContactRetry(contact.id);
-        const retryDelay = Math.pow(2, contact.retry_count) * 30000;
-        emitToCampaignUser(userId, 'campaign:message_retry', {
-          campaignId,
-          contactId: contact.id,
-          phone: contact.phone_number,
-          retryIn: retryDelay,
-          attempt: contact.retry_count + 1,
-        });
-        await sleep(retryDelay);
-
-        try {
-          await waClient.sendMessage(userId, contact.phone_number, message, campaign.media_path);
-
-          db.deductCredits(userId, 1, `Campaign "${campaign.name}" - ${contact.phone_number}`, campaignId);
-          db.incrementCampaignCreditsUsed(campaignId);
-          db.updateContactStatus(contact.id, 'sent', null);
-          run.rateLimiter.recordSend();
-          sentInSession++;
-
-          db.addLog(campaignId, contact.id, contact.phone_number, 'sent', null);
-          emitToCampaignUser(userId, 'campaign:message_sent', {
-            campaignId,
-            contactId: contact.id,
-            phone: contact.phone_number,
-            status: 'sent',
-            timestamp: new Date().toISOString(),
-          });
-        } catch (retryErr) {
-          db.updateContactStatus(contact.id, 'failed', retryErr.message);
-          db.addLog(campaignId, contact.id, contact.phone_number, 'failed', retryErr.message);
-          emitToCampaignUser(userId, 'campaign:message_failed', {
-            campaignId,
-            contactId: contact.id,
-            phone: contact.phone_number,
-            status: 'failed',
-            error: retryErr.message,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      } else {
-        db.updateContactStatus(contact.id, 'failed', err.message);
-        db.addLog(campaignId, contact.id, contact.phone_number, 'failed', err.message);
-        emitToCampaignUser(userId, 'campaign:message_failed', {
-          campaignId,
-          contactId: contact.id,
-          phone: contact.phone_number,
-          status: 'failed',
-          error: err.message,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    db.updateCampaignCounts(campaignId);
-    const updatedCampaign = db.getCampaign(campaignId);
-    const elapsed = Date.now() - startTime;
-    const rate = sentInSession / Math.max(elapsed / 1000, 1);
-    const remaining =
-      updatedCampaign.total_contacts -
-      updatedCampaign.sent_count -
-      updatedCampaign.failed_count -
-      updatedCampaign.skipped_count;
-    const eta = rate > 0 ? remaining / rate : 0;
-
-    emitToCampaignUser(userId, 'campaign:progress', {
-      campaignId,
-      sent: updatedCampaign.sent_count,
-      failed: updatedCampaign.failed_count,
-      skipped: updatedCampaign.skipped_count,
-      total: updatedCampaign.total_contacts,
-      eta: Math.round(eta),
-      rate: Math.round(rate * 100) / 100,
-    });
-  }
-
-  db.updateCampaignCounts(campaignId);
-  db.updateCampaignStatus(campaignId, 'completed');
-  emitToCampaignUser(userId, 'campaign:status', { campaignId, status: 'completed' });
-  clearRun(campaignId);
+  run.promise = runCampaign(run, campaign).catch((error) => {
+    console.error(`Campaign ${campaignId} failed unexpectedly:`, error);
+  });
+  return run;
 }
 
 function pauseCampaign(campaignId, userId, isAdmin = false) {
