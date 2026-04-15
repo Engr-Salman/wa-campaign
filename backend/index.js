@@ -128,10 +128,7 @@ app.use('/api/admin', adminRoutes);
 // WhatsApp status endpoint (protected)
 app.get('/api/whatsapp/status', authMiddleware, (req, res) => {
   waClient.initClient(io, req.user.id);
-  res.json({
-    status: waClient.getConnectionStatus(req.user.id),
-    info: waClient.getClientInfo(req.user.id),
-  });
+  res.json(waClient.getStatusSnapshot(req.user.id));
 });
 
 // WhatsApp logout (protected)
@@ -168,13 +165,10 @@ io.on('connection', (socket) => {
   socket.join(`user:${socket.user.id}`);
   waClient.initClient(io, socket.user.id);
 
-  socket.emit('whatsapp:status', {
-    status: waClient.getConnectionStatus(socket.user.id),
-    info: waClient.getClientInfo(socket.user.id),
-  });
-  const qrCode = waClient.getQrCode(socket.user.id);
-  if (qrCode) {
-    socket.emit('whatsapp:qr', qrCode);
+  const statusSnapshot = waClient.getStatusSnapshot(socket.user.id);
+  socket.emit('whatsapp:status', statusSnapshot);
+  if (statusSnapshot.qr) {
+    socket.emit('whatsapp:qr', statusSnapshot.qr);
   }
 
   socket.on('disconnect', () => {

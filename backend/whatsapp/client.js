@@ -162,8 +162,10 @@ function getSession(userId) {
       status: 'disconnected',
       info: null,
       qr: null,
+      message: '',
       initializing: false,
       initPromise: null,
+      initTimeout: null,
     });
   }
 
@@ -233,6 +235,7 @@ function emitStatus(userId, extra = {}) {
   io.to(getRoom(userId)).emit('whatsapp:status', {
     status: session.status,
     info: session.info,
+    message: session.message || '',
     ...extra,
   });
 }
@@ -254,8 +257,25 @@ function getQrCode(userId) {
   return getSession(userId).qr;
 }
 
+function getStatusSnapshot(userId) {
+  const session = getSession(userId);
+  return {
+    status: session.status,
+    info: session.info,
+    qr: session.qr,
+    message: session.message || '',
+  };
+}
+
 function getClient(userId) {
   return getSession(userId).client;
+}
+
+function clearInitTimeout(session) {
+  if (session.initTimeout) {
+    clearTimeout(session.initTimeout);
+    session.initTimeout = null;
+  }
 }
 
 function initClient(socketIo, userId) {
@@ -272,6 +292,8 @@ function initClient(socketIo, userId) {
 
   session.initializing = true;
   session.status = 'initializing';
+  session.message = '';
+  session.qr = null;
   const { executablePath, source, warning } = resolveExecutablePath();
   if (warning) {
     console.warn(`WhatsApp browser path warning for user ${userId}: ${warning}`);
@@ -301,34 +323,61 @@ function initClient(socketIo, userId) {
   });
 
   session.client = client;
+  clearInitTimeout(session);
+  session.initTimeout = setTimeout(async () => {
+    if (!session.initializing || session.status === 'qr' || session.status === 'connected') {
+      return;
+    }
+
+    session.initializing = false;
+    session.initPromise = null;
+    session.status = 'error';
+    session.message = 'WhatsApp initialization timed out before a QR code was generated. Please try again.';
+
+    try {
+      await client.destroy();
+    } catch {
+      // ignore cleanup failure
+    }
+
+    session.client = null;
+    emitStatus(userId);
+  }, 90000);
 
   client.on('qr', (qr) => {
+    clearInitTimeout(session);
     session.status = 'qr';
     session.qr = qr;
+    session.message = '';
     emitQr(userId, qr);
     emitStatus(userId);
   });
 
   client.on('authenticated', () => {
     session.status = 'authenticated';
+    session.message = '';
     emitStatus(userId);
   });
 
   client.on('auth_failure', (msg) => {
+    clearInitTimeout(session);
     session.initializing = false;
     session.initPromise = null;
     session.status = 'auth_failure';
     session.info = null;
     session.qr = null;
+    session.message = msg || 'WhatsApp authentication failed.';
     session.client = null;
-    emitStatus(userId, { message: msg });
+    emitStatus(userId);
   });
 
   client.on('ready', () => {
+    clearInitTimeout(session);
     session.initializing = false;
     session.initPromise = null;
     session.status = 'connected';
     session.qr = null;
+    session.message = '';
     session.info = {
       pushname: client.info.pushname,
       phone: client.info.wid.user,
@@ -338,11 +387,13 @@ function initClient(socketIo, userId) {
   });
 
   client.on('disconnected', (reason) => {
+    clearInitTimeout(session);
     session.initializing = false;
     session.initPromise = null;
     session.status = 'disconnected';
     session.info = null;
     session.qr = null;
+    session.message = reason || '';
     session.client = null;
     emitStatus(userId, { reason });
   });
@@ -355,6 +406,7 @@ function initClient(socketIo, userId) {
     .then(() => client)
     .catch(async (err) => {
       console.error(`WhatsApp client init error for user ${userId}:`, err);
+      clearInitTimeout(session);
       session.initializing = false;
       session.initPromise = null;
       session.client = null;
@@ -377,8 +429,9 @@ function initClient(socketIo, userId) {
           ? undefined
           : 'No valid Chromium executable was found. Set CHROMIUM_PATH or PUPPETEER_EXECUTABLE_PATH to a valid browser binary.';
 
+      session.message = troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message;
+
       emitStatus(userId, {
-        message: troubleshootingHint ? `${err.message} ${troubleshootingHint}` : err.message,
         executablePath: executablePath || null,
         executablePathSource: source,
       });
@@ -436,9 +489,11 @@ async function logout(userId) {
   session.client = null;
   session.initializing = false;
   session.initPromise = null;
+  clearInitTimeout(session);
   session.status = 'disconnected';
   session.info = null;
   session.qr = null;
+  session.message = '';
   emitStatus(userId);
 
   if (io) {
@@ -453,6 +508,7 @@ module.exports = {
   getConnectionStatus,
   getClientInfo,
   getQrCode,
+  getStatusSnapshot,
   sendMessage,
   logout,
 };

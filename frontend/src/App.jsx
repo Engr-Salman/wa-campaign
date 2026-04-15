@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import {
@@ -60,13 +60,29 @@ function AppLayout() {
   const [qrCode, setQrCode] = useState(null);
   const [theme, setTheme] = useState('light');
 
+  const refreshWhatsappStatus = useCallback(() => {
+    return authFetch('/api/whatsapp/status')
+      .then((r) => readJsonResponse(r))
+      .then((data) => {
+        setWaStatus(data.status);
+        setWaInfo(data.info || null);
+        setWaMessage(data.message || '');
+        setQrCode(data.qr || null);
+      })
+      .catch(() => {});
+  }, [authFetch]);
+
   useEffect(() => {
     if (!on) return;
     const unsub1 = on('whatsapp:status', (data) => {
       setWaStatus(data.status);
       if (data.info) setWaInfo(data.info);
       setWaMessage(data.message || '');
+      if (data.qr) setQrCode(data.qr);
       if (data.status === 'connected') setQrCode(null);
+      if (data.status === 'disconnected' || data.status === 'error' || data.status === 'auth_failure') {
+        setQrCode(null);
+      }
     });
     const unsub2 = on('whatsapp:qr', (qr) => setQrCode(qr));
     return () => { unsub1?.(); unsub2?.(); };
@@ -77,15 +93,22 @@ function AppLayout() {
   }, [theme]);
 
   useEffect(() => {
-    authFetch('/api/whatsapp/status')
-      .then((r) => readJsonResponse(r))
-      .then((data) => {
-        setWaStatus(data.status);
-        if (data.info) setWaInfo(data.info);
-        setWaMessage(data.message || '');
-      })
-      .catch(() => {});
-  }, []);
+    refreshWhatsappStatus();
+  }, [refreshWhatsappStatus]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const hasResolvedQr = waStatus === 'qr' && Boolean(qrCode);
+    if (waStatus === 'connected' || hasResolvedQr || waStatus === 'error' || waStatus === 'auth_failure') {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => {
+      refreshWhatsappStatus();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [user, waStatus, qrCode, refreshWhatsappStatus]);
 
   const handleLogout = async () => {
     try {
