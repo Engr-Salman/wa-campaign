@@ -295,6 +295,7 @@ function initClient(socketIo, userId) {
   session.message = '';
   session.qr = null;
   const { executablePath, source, warning } = resolveExecutablePath();
+  console.log(`[whatsapp] Initializing client for user ${userId} using browser source=${source}${executablePath ? ` path=${executablePath}` : ''}`);
   if (warning) {
     console.warn(`WhatsApp browser path warning for user ${userId}: ${warning}`);
   }
@@ -349,6 +350,7 @@ function initClient(socketIo, userId) {
     session.status = 'qr';
     session.qr = qr;
     session.message = '';
+    console.log(`[whatsapp] QR generated for user ${userId}`);
     emitQr(userId, qr);
     emitStatus(userId);
   });
@@ -356,6 +358,7 @@ function initClient(socketIo, userId) {
   client.on('authenticated', () => {
     session.status = 'authenticated';
     session.message = '';
+    console.log(`[whatsapp] Authenticated for user ${userId}`);
     emitStatus(userId);
   });
 
@@ -368,6 +371,7 @@ function initClient(socketIo, userId) {
     session.qr = null;
     session.message = msg || 'WhatsApp authentication failed.';
     session.client = null;
+    console.error(`[whatsapp] Authentication failure for user ${userId}: ${session.message}`);
     emitStatus(userId);
   });
 
@@ -383,6 +387,7 @@ function initClient(socketIo, userId) {
       phone: client.info.wid.user,
       platform: client.info.platform,
     };
+    console.log(`[whatsapp] Ready for user ${userId} (${session.info.pushname || 'unknown'} / ${session.info.phone || 'unknown'})`);
     emitStatus(userId);
   });
 
@@ -395,10 +400,12 @@ function initClient(socketIo, userId) {
     session.qr = null;
     session.message = reason || '';
     session.client = null;
+    console.warn(`[whatsapp] Disconnected for user ${userId}: ${reason || 'unknown reason'}`);
     emitStatus(userId, { reason });
   });
 
   client.on('change_state', (state) => {
+    console.log(`[whatsapp] State changed for user ${userId}: ${state}`);
     emitStatus(userId, { state });
   });
 

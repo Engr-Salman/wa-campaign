@@ -173,15 +173,15 @@ function AppLayout() {
           {navLink('/campaign/new', <PlusCircle size={18} />, 'New Campaign')}
           {navLink('/history', <HistoryIcon size={18} />, 'History')}
           {navLink('/credits', <Coins size={18} />, 'Credits')}
-          {navLink('/settings', <SettingsIcon size={18} />, 'Settings')}
 
-          {user?.is_admin && (
+          {Boolean(user?.is_admin) && (
             <>
               <div className="border-t dark:border-gray-700 my-3" />
               <p className="text-xs text-gray-400 px-4 font-bold uppercase tracking-wider mb-1">Admin</p>
               {navLink('/admin', <Shield size={18} />, 'Dashboard')}
               {navLink('/admin/users', <Users size={18} />, 'Users')}
               {navLink('/admin/credits', <CreditCard size={18} />, 'Credit Requests')}
+              {navLink('/settings', <SettingsIcon size={18} />, 'Settings')}
             </>
           )}
         </nav>
@@ -193,9 +193,9 @@ function AppLayout() {
             <Route path="/campaign/:id" element={<CampaignDetail socket={socket} />} />
             <Route path="/history" element={<History />} />
             <Route path="/credits" element={<Credits />} />
-            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} onWhatsappLogout={handleLogout} />} />
-            {user?.is_admin && (
+            {Boolean(user?.is_admin) && (
               <>
+                <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} onWhatsappLogout={handleLogout} />} />
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/credits" element={<AdminCredits />} />
